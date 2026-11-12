@@ -358,7 +358,7 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
 
     Ok(JobSpec {
         v: FORMAT_VERSION,
-        id: new_id("j_"),
+        id: new_id("j"),
         title: task.title.clone().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| title_from_prompt(&task.prompt)),
         prompt: task.prompt.clone(),
         agent: task.agent.clone(),
@@ -422,6 +422,17 @@ pub fn launch(home: &Home, id: &str) -> Result<u32> {
     spawn_detached(home, &["__runner", id], &home.job(id).join("runner.log"))
 }
 
+/// Starts a job that was left for a daemon which is no longer running.
+pub fn kick(home: &Home, id: &str) {
+    let Ok(mut state) = store::load_state(home, id) else { return };
+    if state.state == State::Queued && state.runner_pid.is_none() && state.queue.as_deref() == Some("daemon") && daemon_info(home).is_none() {
+        state.queue = None;
+        if store::save_state(home, &state).is_ok() {
+            let _ = launch(home, id);
+        }
+    }
+}
+
 /// Validates, stores and starts a job.
 pub fn submit(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobState> {
     let spec = prepare(ctx, task, opts)?;
@@ -477,7 +488,7 @@ pub fn resume(ctx: &Context, previous: &str, prompt: &str, hold: bool) -> Result
         return Err(HufuError::usage(format!("profile `{profile_name}` cannot resume a session")));
     }
     let mut spec = old.clone();
-    spec.id = new_id("j_");
+    spec.id = new_id("j");
     spec.title = title_from_prompt(prompt);
     spec.prompt = prompt.to_string();
     spec.agent = profile_name;

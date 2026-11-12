@@ -2,10 +2,14 @@
 
 pub mod capability;
 pub mod config;
+pub mod doctor;
 pub mod error;
 pub mod glob;
+pub mod mission;
+pub mod ops;
 pub mod runner;
 pub mod schema;
+pub mod setup;
 pub mod slots;
 pub mod spec;
 pub mod store;

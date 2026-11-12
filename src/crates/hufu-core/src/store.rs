@@ -20,6 +20,11 @@ use crate::tally::CheckOutcome;
 pub const STALE_AFTER: Duration = Duration::from_secs(30);
 pub const HEARTBEAT_EVERY: Duration = Duration::from_secs(5);
 
+/// `STALE_AFTER`, unless `HUFU_STALE_AFTER_MS` shortens it (tests do, so they need not wait).
+pub fn stale_after() -> Duration {
+    std::env::var("HUFU_STALE_AFTER_MS").ok().and_then(|v| v.parse().ok()).map(Duration::from_millis).unwrap_or(STALE_AFTER)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum State {
@@ -345,7 +350,7 @@ fn is_lost(state: &JobState) -> bool {
         return false;
     };
     let beat = state.heartbeat_at.as_deref().and_then(parse_rfc3339).unwrap_or(0);
-    let stale = now_ms().saturating_sub(beat) > STALE_AFTER.as_millis() as u64;
+    let stale = now_ms().saturating_sub(beat) > stale_after().as_millis() as u64;
     stale && !proc::pid_alive(pid)
 }
 
@@ -375,7 +380,10 @@ pub fn job_ids(home: &Home) -> Vec<String> {
 
 /// All jobs, oldest first. Unreadable records are skipped rather than failing the listing.
 pub fn list_jobs(home: &Home) -> Vec<JobState> {
-    job_ids(home).iter().filter_map(|id| load_state(home, id).ok()).collect()
+    let mut jobs: Vec<JobState> = job_ids(home).iter().filter_map(|id| load_state(home, id).ok()).collect();
+    // Ids only sort to the second; the creation time breaks ties.
+    jobs.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+    jobs
 }
 
 /// Accepts a full job id or an unambiguous prefix.

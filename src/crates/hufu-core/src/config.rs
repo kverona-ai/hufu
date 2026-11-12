@@ -391,6 +391,12 @@ impl Config {
                 out.push(format!("{field}: {e}"));
             }
         }
+        if self.defaults.permission == Tier::FullAccess {
+            out.push("defaults.permission: `full-access` cannot be the global default; ask for it per task, or on a profile with `allow_full_access: true`".into());
+        }
+        if self.defaults.retry.max_attempts == 0 {
+            out.push("defaults.retry.max_attempts: must be at least 1".into());
+        }
         if self.limits.max_concurrent_jobs == 0 {
             out.push("limits.max_concurrent_jobs: must be at least 1".into());
         }
@@ -677,11 +683,10 @@ pub fn parse_scalar(text: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use hufu_contract::Adapter;
+pub(crate) mod tests_support {
+    use hufu_contract::{Adapter, AdapterRegistry, Profile};
 
-    struct Kinds;
+    pub struct Kinds;
     struct Fake(&'static str, Option<&'static str>);
     impl Adapter for Fake {
         fn kind(&self) -> &'static str {
@@ -724,6 +729,17 @@ mod tests {
             FAKES.iter().map(|f| f.0).collect()
         }
     }
+
+    /// A registry that knows every built-in adapter kind but cannot run anything.
+    pub fn kinds() -> &'static dyn AdapterRegistry {
+        &Kinds
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::Kinds;
+    use super::*;
 
     const SAMPLE: &str = r#"
 version: 1
@@ -847,5 +863,18 @@ capabilities:
         assert_eq!(parse_scalar("true"), json!(true));
         assert_eq!(parse_scalar("plain text"), json!("plain text"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod yaml_gotchas {
+    use super::*;
+
+    #[test]
+    fn retry_on_is_a_string_key() {
+        let v = parse_yaml("defaults:\n  retry:\n    max_attempts: 3\n    on: [rate_limited, agent_error]\n    backoff: 5s\n").unwrap();
+        let config: Config = serde_json::from_value(v).unwrap();
+        assert_eq!(config.defaults.retry.on, ["rate_limited", "agent_error"]);
+        assert_eq!(parse_yaml("a: [yes, no, on, off]").unwrap()["a"].as_array().unwrap().len(), 4);
     }
 }

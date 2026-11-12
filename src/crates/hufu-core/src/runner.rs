@@ -412,7 +412,7 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     let token = shared.token();
 
     // 5. What changed.
-    let mut files = match (&worktree, &before) {
+    let mut files: Vec<String> = match (&worktree, &before) {
         (Some(wt), _) => workspace::changed_since(&wt.path, &wt.base),
         (None, Some(b)) => workspace::snapshot(&spec.cwd).map(|after| workspace::changed(b, &after)).unwrap_or_default(),
         (None, None) => outcome.touched_paths.clone(),
@@ -471,7 +471,13 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             end.warnings.push(format!("the agent skipped {} action(s) for lack of permission; see `denied_actions`", list.len()));
         }
     }
-    if spec.permission == Tier::ReadOnly && !files.is_empty() {
+    let other_writers = if spec.permission == Tier::ReadOnly && !files.is_empty() && worktree.is_none() { overlapping_writers(shared, spec) } else { Vec::new() };
+    if spec.permission == Tier::ReadOnly && !files.is_empty() && !other_writers.is_empty() {
+        // Another job was writing here at the same time, so the changes cannot be pinned on this one.
+        end.warnings.push(format!("{} file(s) changed during this read-only job, while {} was writing to the same workspace; the read-only check could not be applied", files.len(), other_writers.join(", ")));
+        end.changes.files.clear();
+        files.clear();
+    } else if spec.permission == Tier::ReadOnly && !files.is_empty() {
         let shown: Vec<&str> = files.iter().take(10).map(String::as_str).collect();
         end.state = State::Failed;
         end.reason = Some(reason::TIER_VIOLATED.into());
@@ -516,6 +522,22 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     end.outcome = Some(outcome);
     drop(slot);
     end
+}
+
+/// Jobs that could write to this job's workspace while it ran.
+fn overlapping_writers(shared: &Shared, spec: &JobSpec) -> Vec<String> {
+    let started = lock(&shared.state).started_at.as_deref().and_then(parse_rfc3339).unwrap_or(0);
+    let here = workspace::repo_root(&spec.cwd).unwrap_or_else(|| spec.cwd.clone());
+    store::list_jobs(shared.home)
+        .into_iter()
+        .filter(|j| j.id != spec.id && j.permission >= Tier::WorkspaceWrite)
+        .filter(|j| j.finished_at.as_deref().and_then(parse_rfc3339).map(|end| end >= started).unwrap_or(j.started_at.is_some()))
+        .filter(|j| {
+            let path = j.workspace.as_ref().map(|w| PathBuf::from(&w.path)).unwrap_or_else(|| PathBuf::from(&j.cwd));
+            path.starts_with(&here) || here.starts_with(&path)
+        })
+        .map(|j| j.id)
+        .collect()
 }
 
 fn write_end(shared: &Shared, sink: &JobSink, spec: &JobSpec, end: End) -> JobState {
@@ -730,6 +752,7 @@ pub fn force_cancel(home: &Home, id: &str) -> Result<JobState> {
 pub fn wait(home: &Home, id: &str, limit: Option<Duration>) -> Result<JobState> {
     let started = Instant::now();
     let mut pause = Duration::from_millis(50);
+    submit::kick(home, id);
     loop {
         let state = store::load_state(home, id)?;
         if state.state.is_terminal() {
