@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/hufu-contract",
+    "crates/hufu-adapters",
+    "crates/hufu-core",
+    "crates/hufu-mcp",
+    "crates/hufu-daemon",
+    "crates/hufu-testing",
+    "crates/hufu-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/kverona-ai/hufu"
+homepage = "https://github.com/kverona-ai/hufu"
+authors = ["Hufu contributors"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-saphyr = "2"
+clap = { version = "4", features = ["derive"] }
+getrandom = "0.4"
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+hufu-contract = { path = "crates/hufu-contract", version = "0.1.0" }
+hufu-adapters = { path = "crates/hufu-adapters", version = "0.1.0" }
+hufu-core = { path = "crates/hufu-core", version = "0.1.0" }
+hufu-mcp = { path = "crates/hufu-mcp", version = "0.1.0" }
+hufu-daemon = { path = "crates/hufu-daemon", version = "0.1.0" }
+hufu-testing = { path = "crates/hufu-testing", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

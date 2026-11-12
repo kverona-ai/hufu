@@ -1,0 +1,17 @@
+[package]
+name = "hufu-adapters"
+description = "Agent adapters for Hufu: Codex, Antigravity, Cursor, Kimi Code, pi, Claude Code and any ACP agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hufu-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
