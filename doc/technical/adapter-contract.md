@@ -2,87 +2,125 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review. Nothing here is implemented yet |
-| **Last updated** | 2026-11-12 (interface rewritten as a Rust trait) |
-| **Related** | [Agent landscape](../research/agent-landscape.md), [Technical design](technical-design.md), [ADR-0002](../adr/0002-acp-first-cli-fallback.md), [ADR-0005](../adr/0005-explicit-permission-and-effort-mapping.md) |
+| **Status** | Describes Hufu 0.1 as implemented. Per-agent details follow each vendor's documentation as read on 2026-11-12 and have not been run against real accounts by this project |
+| **Last updated** | 2026-11-12 (the interface as built; Claude Code, Kimi and pi tiers; third-party adapters; failure reasons) |
+| **Related** | [Agent landscape](../research/agent-landscape.md), [Technical design](technical-design.md), [ADR-0002](../adr/0002-acp-first-cli-fallback.md), [ADR-0005](../adr/0005-explicit-permission-and-effort-mapping.md), [ADR-0009](../adr/0009-synchronous-core-and-own-protocol-clients.md) |
 
 An adapter is the only code that knows how one kind of agent is driven. This document defines what
 an adapter must do, how Hufu's uniform permission tiers and effort levels map onto each agent, and
-the per-agent notes an implementer needs.
+the per-agent notes.
 
 The evidence marks (✅ ◐ ⚠️ ❓) are those defined in the
-[agent landscape](../research/agent-landscape.md). Anything not marked ✅ must be confirmed against
-the installed CLI before its adapter ships.
+[agent landscape](../research/agent-landscape.md). The quickest way to see what Hufu will run for
+your own profile is `hufu run -a <profile> -p <tier> -e <effort> --dry-run "x"`.
 
 ## 1. Interface
 
-The contract lives in the `hufu-contract` crate. Sketch:
+The contract lives in the `hufu-contract` crate (`src/crates/hufu-contract/src/types.rs`). It is
+synchronous: `run` blocks its thread until the agent is done.
 
 ```rust
-#[async_trait]
 pub trait Adapter: Send + Sync {
-    /// Adapter kind, e.g. "acp", "codex-cli".
+    /// The adapter kind used in configuration, for example "codex-cli".
     fn kind(&self) -> &'static str;
 
-    /// Is the agent installed? Which version? Is it logged in, if that can be told cheaply?
-    async fn probe(&self, profile: &ResolvedProfile) -> ProbeResult;
+    /// The command used when the profile gives none.
+    fn default_command(&self) -> Vec<String>;
 
-    /// What this profile can do. Used to validate a task before anything runs.
-    async fn capabilities(&self, profile: &ResolvedProfile) -> Result<Capabilities, AdapterError>;
+    /// The variable that points the agent at its configuration and login directory, if it has
+    /// one. A profile's `home` is passed through it, which is how accounts are kept apart.
+    fn home_var(&self) -> Option<&'static str> { None }
 
-    /// Run one prompt to completion. Emit normalized events to `sink` as they happen.
-    /// Must stop the agent when `cancel` fires. Agent-side failures are not errors of
-    /// this call; they are returned in the outcome.
-    async fn run(
-        &self,
-        request: RunRequest,
-        sink: &dyn EventSink,
-        cancel: CancellationToken,
-    ) -> RunOutcome;
+    /// Is the agent installed? Which version? Is it logged in, if that can be told without
+    /// starting a model? Must not prompt.
+    fn probe(&self, profile: &Profile) -> ProbeResult;
+
+    /// What this profile can do. Static: must not start the agent.
+    fn capabilities(&self, profile: &Profile) -> Capabilities;
+
+    /// Builds the invocation without running it. This is what `--dry-run` prints and what the
+    /// conformance suite inspects.
+    fn plan(&self, profile: &Profile, req: &RunRequest) -> Result<LaunchPlan, AdapterError>;
+
+    /// Runs one prompt to completion, emitting normalized events to `sink` as they happen.
+    /// Must stop the agent when `cancel` fires. Agent-side failures are not errors of this
+    /// call; they are returned in the outcome.
+    fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken)
+        -> RunOutcome;
 }
 
 pub struct Capabilities {
-    pub permission_tiers: Vec<PermissionTier>, // tiers this profile can truly honour
-    pub efforts: Vec<Effort>,                  // levels with an exact native mapping
-    pub models: ModelSupport,                  // List(ids) | Any (passed through) | Unknown
-    pub resume: bool,                          // can a later prompt continue this session?
-    pub structured_output: bool,               // can the agent be held to a JSON Schema?
+    pub permission_tiers: Vec<Tier>,          // tiers this profile can truly enforce
+    pub efforts: Vec<Effort>,                 // levels with a native mapping; `default` always works
+    pub native_effort: bool,                  // is `native:<value>` passed through?
+    pub checked_at_runtime: bool,             // effort and model only known once a session is open (ACP)
+    pub models: Vec<String>,                  // known ids; empty means "not known ahead of time"
+    pub resume: bool,                         // can a later prompt continue this session?
+    pub structured_output: StructuredOutput,  // Native | Instructed | None
     pub reports_usage: bool,
-    pub reports_denials: bool,                 // can skipped actions be detected reliably?
-    pub accepts_mcp_servers: bool,             // can Hufu attach an MCP server to the session?
-    pub provides: Vec<Capability>,             // e.g. ComputerUse (planned)
+    pub reports_denials: bool,                // can skipped actions be detected?
+    pub accepts_mcp_servers: bool,            // can Hufu attach an MCP server to one run?
+    pub provides: Vec<String>,                // capabilities beyond code tools
+    pub notes: Vec<String>,                   // caveats shown by `hufu profile show`
 }
 
 pub struct RunRequest {
+    pub job_id: String,
     pub prompt: String,
     pub cwd: PathBuf,
-    pub permission: PermissionTier,            // always explicit
-    pub effort: Effort,                        // Effort::Default means: pass nothing
+    pub permission: Tier,                     // always explicit
+    pub effort: Effort,                       // Effort::Default means: pass nothing
     pub model: Option<String>,
     pub output_schema: Option<serde_json::Value>,
     pub resume_session: Option<String>,
-    pub env: BTreeMap<String, String>,         // already filtered by the runner
-    pub mcp_servers: Vec<McpServerSpec>,       // servers Hufu attaches, if any
+    pub env: BTreeMap<String, String>,        // already filtered by the runner
+    pub mcp_servers: Vec<McpServerSpec>,      // servers Hufu attaches, if any
+    pub scratch_dir: PathBuf,                 // the job's directory, for files the agent needs
 }
 
 pub struct RunOutcome {
-    pub status: RunStatus,                     // Completed | Failed | Cancelled
-    pub reason: Option<FailureReason>,         // e.g. AuthRequired, EmptyOutput
+    pub status: RunStatus,                    // Completed | Failed | Cancelled
+    pub reason: Option<String>,               // a reason code, section 2.1
+    pub detail: Option<String>,
     pub final_message: Option<String>,
     pub structured_output: Option<serde_json::Value>,
     pub denied_actions: Vec<DeniedAction>,
-    pub session: Option<SessionRef>,           // id and whether it can be resumed
+    pub session: Option<SessionRef>,          // id and whether it can be resumed
     pub usage: Option<Usage>,
+    pub exit_code: Option<i32>,
+    pub retryable: bool,
+    pub touched_paths: Vec<String>,           // paths the agent said it changed
 }
 ```
+
+`hufu-adapters/src/common.rs` holds what the CLI adapters share: resolving the program, building
+the environment, running the process with line-by-line output, collecting an outcome, recognising
+login and rate-limit messages, and the prompt suffix that asks an agent for JSON.
+
+### 1.1 Third-party adapters
+
+An adapter can also be a program outside Hufu (`adapter: external`, `command: [my-adapter]`). It
+is called with one of three subcommands and reads one JSON document from stdin:
+
+| Call | stdin | stdout |
+|---|---|---|
+| `<cmd> probe` | `{"v":1,"profile":{...}}` | one `ProbeResult` object |
+| `<cmd> capabilities` | `{"v":1,"profile":{...}}` | one `Capabilities` object |
+| `<cmd> run` | `{"v":1,"profile":{...},"request":{...}}` | JSON Lines: normalized events, then one `{"type":"outcome", ...}` line |
+
+The shapes are the serialized forms of the types above. Hufu still validates the task against the
+declared capabilities, stops the program's process tree on cancel, and applies rule 4 below. The
+fake agent `hufu __fake-agent external` is a complete example.
 
 ## 2. Rules every adapter follows
 
 1. **State the tier explicitly.** Build the invocation so that the requested tier is spelled out in
    flags or in ACP permission answers. Never rely on what the agent does by default.
-2. **Refuse what cannot be honoured.** If the tier, effort level, model or structured output cannot
-   be delivered, `capabilities()` must not advertise it. Hufu then rejects the task before launch.
+2. **Refuse what cannot be honoured.** If the tier, effort level or resume cannot be delivered,
+   `capabilities()` must not advertise it and `plan()` must return an error. Hufu refuses the task
+   before launch.
 3. **Never widen.** No adapter may run an agent at a higher tier than requested, for any reason.
+   `args` from the profile that would change the tier are refused.
 4. **Do not trust exit codes alone.** A run counts as completed only if a final message was
    produced. An exit code of `0` with no message is `failed` with reason `empty_output`.
 5. **Report denials.** Where the agent says it skipped an action for lack of permission, emit
@@ -90,12 +128,31 @@ pub struct RunOutcome {
 6. **Close stdin** unless the protocol needs it, and never attach the caller's terminal.
 7. **Set the working directory** by flag where the agent has one, and always as the child process's
    cwd as well.
-8. **Check the version.** `probe()` records the agent version. An adapter may refuse versions it is
-   known not to work with.
-9. **Stop cleanly.** On abort: ask the agent to stop, then let the runner terminate the process
-   group.
+8. **Record the version.** `probe()` reports the agent version, and it is stored with every job.
+9. **Stop cleanly.** On cancel: ask the agent to stop, then let the process group be terminated.
 10. **Keep the raw output.** Everything the agent wrote goes to the job's `raw/` directory
-    untouched, in addition to normalized events.
+    untouched, in addition to normalized events. A line that cannot be parsed is skipped, not fatal.
+11. **Never touch credentials.** An adapter may check that a login file exists or ask the agent's
+    own status command; it never reads, copies or logs a credential.
+
+### 2.1 Failure reasons
+
+| Reason | Meaning | Retried or failed over |
+|---|---|---|
+| `agent_unavailable` | The program is not installed or could not be started | Next pool member |
+| `auth_required` | Not logged in, or a required variable is not set | Next pool member |
+| `rate_limited` | The agent reported a rate or quota limit | Next pool member; retried by default |
+| `agent_error` | The agent reported an error or exited non-zero | Only if listed in `retry.on` |
+| `empty_output` | The agent ended without a final message | 〃 |
+| `invalid_output` | The answer does not match the requested schema | 〃 |
+| `protocol_error` | An ACP or adapter-protocol exchange went wrong | 〃 |
+| `refusal`, `max_tokens`, `max_turn_requests` | ACP stop reasons other than a normal end | 〃 |
+| `unsupported` | The request cannot be expressed for this agent (caught at validation in normal use) | No |
+| `permission_denied` | `strict_permissions` and an action was denied | No |
+| `tier_violated` | A read-only job changed files | No |
+| `timeout`, `inactivity_timeout` | Hufu's timers; the job ends `timed_out` | No |
+| `cancelled` | Asked to stop; the job ends `cancelled` | No |
+| `dependency_failed`, `workspace_error`, `runner_died`, `internal_error` | Set by the runner, not by adapters | `runner_died` by the daemon, see the technical design |
 
 ## 3. Permission tiers
 
@@ -107,29 +164,32 @@ pub struct RunOutcome {
 
 ### 3.1 Mapping
 
-| Agent (surface) | `read-only` | `workspace-write` | `full-access` |
+| Agent (adapter) | `read-only` | `workspace-write` | `full-access` |
 |---|---|---|---|
-| **Codex** (CLI) ◐ | `--sandbox read-only` | `--sandbox workspace-write` | `--dangerously-bypass-approvals-and-sandbox` |
-| **Cursor** (CLI) ✅ | `--mode plan` | Print mode without `--force`: workspace edits applied, other actions rejected | `--force` |
-| **Antigravity** (CLI) ✅ | No allow rules, `--sandbox`; actions needing approval are soft-denied | Conditional: needs `permissions.allow` rules in settings. Advertised only when the profile declares them | `--dangerously-skip-permissions` |
-| **Kimi Code** (CLI) ✅ | Not available | Not available | `--print` (implies `--afk`) |
-| **Kimi Code** (ACP) ⚠️ | By permission answers; to be verified | By permission answers; to be verified | Allow all |
-| **pi** (CLI, RPC) ✅ | Not available | Not available | Only mode: pi has no permission system |
-| **Generic ACP agent** | Allow `read`, `search`, `think`; reject the rest | Also allow `edit`, `delete`, `move` for paths inside the workspace; `execute` and `fetch` by allow-list | Allow every request |
+| **Codex** (`codex-cli`) ◐ | `--sandbox read-only` | `--sandbox workspace-write` | `--dangerously-bypass-approvals-and-sandbox` |
+| **Antigravity** (`agy-cli`) ✅ | `--mode plan --sandbox` | `--sandbox`: workspace edits are applied, commands need an allow rule in agy's own settings or are soft-denied | `--dangerously-skip-permissions` |
+| **Cursor** (`cursor-cli`) ✅ | `--mode plan` | Print mode without `--force`: workspace edits applied, other actions rejected | `--force` |
+| **Claude Code** (`claude-cli`) ◐ | `--permission-mode plan` | `--permission-mode acceptEdits`: file edits allowed, other tools need Claude Code's own allow rules | `--dangerously-skip-permissions` |
+| **Kimi Code** (`kimi-cli`) ✅ | Not available | Not available | Print mode, which approves every tool call |
+| **pi** (`pi`) ✅ | `--tools read --no-mcp`: only pi's `read` tool is offered | Not available: pi cannot confine edits to the workspace | No restriction: pi has no permission system |
+| **ACP agent** (`acp`), `verified` | Allow `read`, `search`, `think`; reject the rest | Also allow `edit`, `delete`, `move` for paths inside the workspace, and `execute` for commands starting with a prefix in `allow_execute` | Allow every request |
+| **ACP agent** (`acp`), not verified | Not available | Not available | Allow every request |
 
 Notes:
 
-- **"Not available" is a hard stop.** A task asking Kimi's print mode or pi for `read-only` is
-  rejected with a message naming the tiers that profile does support. Use worktree isolation or a
-  container when running these agents.
+- **"Not available" is a hard stop.** A task asking Kimi's print mode for `read-only` is refused
+  with a message naming the tiers that profile does support. Use `kimi-acp`, worktree isolation or
+  a container.
+- **Hufu checks afterwards, too.** Whatever the agent's own controls did, a `read-only` job whose
+  workspace changed fails with `tier_violated`. That check does not depend on the agent.
 - **ACP answers are only as good as the questions.** An ACP agent decides which actions to ask
-  about. If it never asks before editing, Hufu cannot stop it. `capabilities()` for a generic ACP
-  profile therefore advertises `read-only` and `workspace-write` only when the profile is marked
-  `permission_requests: verified` in configuration, after someone has checked that agent.
-- **ACP modes.** Where an ACP agent advertises a plan-like mode or config option, the adapter also
-  selects it for `read-only`, as a second control.
-- **The Cursor middle tier is Cursor's own boundary**, not Hufu's: workspace edits are applied,
-  shell commands outside its allow-list are rejected. Those rejections surface as denied actions.
+  about. If it never asks before editing, Hufu cannot stop it. A generic ACP profile therefore
+  advertises `read-only` and `workspace-write` only when it is marked
+  `permission_requests: verified`, after someone has checked that agent. Every permission request
+  is answered with a once-only option, never "always", and an `execute` request whose command text
+  is not given is rejected at `workspace-write`.
+- **The middle tier of Cursor, Antigravity and Claude Code is the agent's own boundary**, not
+  Hufu's. Rejections inside it surface as denied actions.
 
 ### 3.2 Denied actions
 
@@ -137,26 +197,27 @@ Notes:
 |---|---|
 | Codex ◐ | Failed or declined command items in the `--json` event stream |
 | Cursor ✅ | `tool_call` events that complete as rejected |
-| Antigravity ✅ | Notice on stderr and step events; the process still exits `0`, so this check is mandatory |
-| ACP | Hufu's own `reject` answers, plus tool calls that end with status `failed` after a rejection |
+| Antigravity ✅ | Step events whose tool error is a permission denial; the process still exits `0`, so this check is mandatory |
+| Claude Code ◐ | `permission_denials` in the result event |
+| ACP | Hufu's own `reject` answers |
 | Kimi print mode, pi | Not applicable: nothing is ever denied |
 
-With `strict_permissions: true`, the default, any denied action fails the job with reason
-`permission_denied`.
+Denied actions are listed in the result. With `strict_permissions: true` any of them fails the job
+with reason `permission_denied`; the default is `false`.
 
 ## 4. Effort mapping
 
 Hufu's scale is `off`, `low`, `medium`, `high`, `max`, plus `default`, which means "pass nothing and
 let the agent decide".
 
-| Hufu | Codex ◐ `model_reasoning_effort` | Antigravity ✅ `--effort` | Kimi ✅ | pi ✅ `--thinking` | Cursor | ACP |
-|---|---|---|---|---|---|---|
-| `off` | n/a | n/a | `--no-thinking` | `off` | n/a | Option of category `thought_level`, if advertised, matched by value |
-| `low` | `low` | `low` | n/a | `low` | n/a | 〃 |
-| `medium` | `medium` | `medium` | n/a | `medium` | n/a | 〃 |
-| `high` | `high` | `high` | `--thinking` | `high` | n/a | 〃 |
-| `max` | `max` | n/a | n/a | `max` | n/a | 〃 |
-| `default` | (omit) | (omit) | (omit) | (omit) | (omit) | (leave unset) |
+| Hufu | Codex ◐ `-c model_reasoning_effort=` | Antigravity ✅ `--effort` | Claude Code ◐ `--effort` | Kimi ✅ `KIMI_MODEL_THINKING_EFFORT` | pi ✅ `--thinking` | Cursor | ACP |
+|---|---|---|---|---|---|---|---|
+| `off` | n/a | n/a | n/a | n/a | `off` | n/a | The session's `thought_level` option, if advertised, matched by value |
+| `low` | `low` | `low` | `low` | `low` | `low` | n/a | 〃 |
+| `medium` | `medium` | `medium` | `medium` | `medium` | `medium` | n/a | 〃 |
+| `high` | `high` | `high` | `high` | `high` | `high` | n/a | 〃 |
+| `max` | `max` | n/a | `max` | `max` | `max` | n/a | 〃 |
+| `default` | (omit) | (omit) | (omit) | (unset) | (omit) | (omit) | (leave unset) |
 
 - **n/a means an error**, not a silent skip. A task asking Antigravity for `max` fails validation.
 - A profile may set `effort_fallback: nearest` to accept the closest supported level instead. The
@@ -164,56 +225,57 @@ let the agent decide".
 - Agents with more native levels than Hufu's scale (Codex `xhigh` and `ultra`, pi `minimal` and
   `xhigh`) can be reached with `effort: native:<value>`, which is passed through verbatim and
   validated only by the agent.
-- Kimi's control is a boolean, so only two levels map: `off` to `--no-thinking` and `high` to
-  `--thinking`.
-- Cursor has no known effort control ❓. If reasoning strength is encoded in its model ids, it is
-  selected through `model`.
+- Cursor has no effort control; reasoning strength is selected through the model id.
+- For ACP the levels are only known once a session is open, so a level the agent does not offer
+  fails the job at start rather than at submission.
 
 ## 5. Per-agent notes
 
 ### 5.1 Codex CLI
 
-Evidence: ◐ vendor documentation, summarised; confirm with `--help`.
+Evidence: ◐ vendor documentation and `codex-rs/exec` sources.
 
 ```text
-codex exec --json --cd <cwd> --sandbox <tier> --ask-for-approval never \
-  [-m <model>] [-c model_reasoning_effort=<level>] [--output-schema <file>] -
+codex exec --cd <cwd> --sandbox <tier> [-m <model>] [-c model_reasoning_effort="<level>"] \
+  --json --color never [--skip-git-repo-check] [--output-schema <file>] -o <last-message file> -
 ```
 
-- Preferred surface: CLI. An ACP adapter (`codex-acp`) exists and can be used through the generic
-  ACP profile instead.
 - The prompt is written to stdin (`-`), which is then closed.
-- With `--json`, stdout is JSON Lines: `thread.started`, `turn.*`, `item.*`, `error`.
+- With `--json`, stdout is JSON Lines: `thread.started`, `turn.*`, `item.*`, `error`. The final
+  message is also read from the `-o` file, which is removed before each run so that a stale one is
+  never mistaken for an answer. A turn that failed fails the job even when the exit code is `0`.
 - The default sandbox for `codex exec` is read-only. The adapter still passes the flag every time.
-- Resume: `codex exec resume <SESSION_ID>`.
 - Requires a Git repository unless `--skip-git-repo-check` is given; the adapter passes that flag
-  only when the workspace is not a repository and says so in a warning.
-- Auth: saved login, or `CODEX_API_KEY` if the profile passes it through.
+  only when the workspace is not a repository and says so in a note.
+- Resume: `codex exec resume <SESSION_ID>`. Structured output: `--output-schema`.
+- An attached MCP server is passed as `-c mcp_servers.<name>.command=...` overrides.
+- Account: `home` becomes `CODEX_HOME`. Auth: saved login, or `CODEX_API_KEY` if the profile passes
+  it through.
 
 ### 5.2 Antigravity (`agy`) CLI
 
 Evidence: ✅ vendor documentation.
 
 ```text
-agy -p <prompt> --output-format stream-json [--model <slug>] [--effort <level>] \
-  [--json-schema <schema>] [--sandbox] [--dangerously-skip-permissions] < /dev/null
+agy -p <prompt> --output-format stream-json [--mode plan] [--sandbox | --dangerously-skip-permissions] \
+  [--model <slug>] [--effort <level>] [--json-schema <file>] [--conversation <id>]
 ```
 
 - Only surface: CLI. No ACP entry point was found.
 - **No cwd flag.** The adapter sets the child process's working directory.
-- **stdin must be closed.** An open stdin pipe is reported to hang some versions.
+- **stdin is closed.** An open stdin pipe is reported to hang some versions.
 - **Empty stdout without a TTY** is a reported bug
   ([#76](https://github.com/google-antigravity/antigravity-cli/issues/76)) ⚠️. The adapter treats
-  "exit 0, no result event" as `empty_output`. If the installed version is affected, the fallback
-  is to run `agy` under a pseudo-terminal; the `portable-pty` crate covers this, and whether it is
-  needed is decided during M1 testing on a real install.
+  "exit 0, no result event" as `empty_output`. Hufu does not run `agy` under a pseudo-terminal; if
+  an installed version is affected, the job fails clearly and upgrading `agy` is the fix.
 - **Soft denial.** Without `--dangerously-skip-permissions`, actions needing approval are skipped
   and the process exits `0`. Denial detection is mandatory.
-- **No default timeout** (`--print-timeout` defaults to no limit). Hufu's own timers apply.
+- **No default timeout.** Hufu's own timers apply.
 - Unknown model ids exit non-zero; they do not fall back.
 - Resume: `--conversation <id>` using `conversation_id` from the result.
-- Auth: cached login from an interactive session. If absent, the run exits with an
-  "authentication required" error, mapped to `auth_required`.
+- Auth: cached login from an interactive session. If absent, the run fails with `auth_required`.
+- `agy` has no documented variable for its configuration directory, so `home` is not available;
+  a second account needs a variable the vendor documents, passed with `vars` or `env_from`.
 - Open question on terms of use for subscription accounts: see the
   [agent landscape](../research/agent-landscape.md#34-antigravity-cli-agy).
 
@@ -222,92 +284,107 @@ agy -p <prompt> --output-format stream-json [--model <slug>] [--effort <level>] 
 Evidence: ✅ vendor documentation.
 
 ```text
-agent -p <prompt> --output-format stream-json --workspace <cwd> --trust \
-  [--model <id>] [--mode plan] [--force]
+agent -p --output-format stream-json --workspace <cwd> --trust [--mode plan | --force] \
+  [--model <id>] [--resume <chatId>] <prompt>
 ```
 
-- Both surfaces work. Default: CLI for one-shot jobs; ACP (`agent acp`, a hidden command) when
-  permission answers per action are wanted.
+- Both surfaces work: the headless CLI (preset `cursor`), and ACP (`agent acp`, preset
+  `cursor-acp`) when permission answers per action are wanted.
 - Stream events: `system`, `user`, `assistant`, `tool_call`, `result`. Thinking is not emitted.
-- Over ACP, an unanswered permission request blocks the agent; the adapter always answers.
-- Resume: `--resume <chatId>`.
-- Auth: `CURSOR_API_KEY` if passed through, or a saved `agent login`.
+- Structured output is by instruction. Usage is not reported.
+- Account: `home` becomes `CURSOR_CONFIG_DIR`. Auth: `CURSOR_API_KEY` if passed through, or a saved
+  `agent login`.
 
 ### 5.4 Kimi Code
 
 Evidence: ✅ vendor documentation.
 
 ```text
-kimi acp                                   # preferred
-kimi --print --output-format stream-json -p <prompt> -w <cwd> [-m <model>] [--thinking]
+kimi -p <prompt> --output-format stream-json [-m <model>]      # preset `kimi`, full-access only
+kimi acp                                                       # preset `kimi-acp`
 ```
 
-- Preferred surface: ACP, because print mode always auto-approves.
-- `kimi acp` is a multi-session server. Not logged in returns `AUTH_REQUIRED` (`-32000`), mapped to
-  `auth_required` with the hint `kimi login`.
-- Resume in print mode: `--session <ID>`.
+- Print mode always approves, so it supports only `full-access`. ACP is the way to lower tiers.
+- Effort is set through the `KIMI_MODEL_THINKING_EFFORT` variable.
+- Print mode does not report a session id, so it cannot resume, and it reads MCP servers only from
+  its own settings file; both are available over ACP.
+- `kimi acp` not logged in answers `AUTH_REQUIRED` (`-32000`), mapped to `auth_required` with the
+  hint `kimi login`.
+- Account: `home` becomes `KIMI_CODE_HOME`.
 
 ### 5.5 pi
 
 Evidence: ✅ vendor documentation.
 
 ```text
-pi --mode json -p <prompt> --provider <name> --model <provider/id> [--thinking <level>]
+pi --mode json [--tools read --no-mcp] [--provider <name>] [--model <id>] [--thinking <level>] \
+  [--session <id>] <prompt>
 ```
 
 - pi is Hufu's route to open-API models. A profile names a provider and a model; the API key
-  reaches pi through an environment variable the profile lists in `env`.
-- Surfaces: `--mode json` for one-shot jobs; `--mode rpc` when a session must stay open; the
-  community `pi-acp` adapter is an alternative through the generic ACP profile.
-- `full-access` is the only tier. pi's own advice is to run it in a container.
+  reaches pi through an environment variable the profile lists in `env` or renames with `env_from`.
+  `hufu doctor` knows the usual variable of each common provider and says when it is not set.
+- `full-access` is unrestricted; pi's own advice is to run it in a container. `read-only` limits pi
+  to its `read` tool.
 - Non-interactive modes show no project trust prompt.
-- Resume: `--session <id>`.
+- Resume: `--session <id>`. Account: `home` becomes `PI_CODING_AGENT_DIR`.
 - pi itself requires Node.js ≥ 22.19. Hufu does not.
 
 ### 5.6 Claude Code
 
-Evidence: ⚠️ not yet verified.
+Evidence: ◐ vendor documentation.
 
-To be verified when the adapter is written. Expected surface: `claude -p` with a streaming JSON
-output format and an explicit permission mode, or the `claude-agent-acp` adapter through the generic
-ACP profile. Needed so that Claude Code can be an executor under a different advisor.
+```text
+claude -p --output-format stream-json --verbose --permission-mode <plan|acceptEdits> | \
+  --dangerously-skip-permissions [--model <id>] [--effort <level>] [--json-schema <schema>] \
+  [--resume <id>] [--mcp-config <json>]
+```
+
+- The prompt is written to stdin. Present so that Claude Code can be an executor, or the advisor of
+  a mission, under any caller.
+- Login is checked with `claude auth status`. Account: `home` becomes `CLAUDE_CONFIG_DIR`. Auth:
+  saved login, or `ANTHROPIC_API_KEY` if the profile passes it through.
+- Denials come from the result event; usage and cost are reported.
 
 ### 5.7 Generic ACP
 
 ```yaml
 profiles:
-  gemini:
+  my-agent:
     adapter: acp
-    command: [gemini, --acp]        # whatever starts the agent in ACP mode
+    command: [my-agent, acp]        # whatever starts the agent in ACP mode
     permission_requests: unverified # tiers below full-access are not advertised until verified
+    allow_execute: ["npm test"]     # commands allowed at workspace-write, by prefix
 ```
 
+The client is written for Hufu ([ADR-0009](../adr/0009-synchronous-core-and-own-protocol-clients.md)).
 Flow:
 
 1. Spawn `command` with pipes; speak newline-delimited JSON-RPC 2.0.
-2. `initialize` with `protocolVersion: 1`. Advertise no file-system or terminal client capabilities
-   by default, so the agent uses its own tools.
-3. `authenticate` if the agent advertises methods and reports that it is not logged in. Hufu never
-   performs an interactive login; it fails with `auth_required` and a hint.
-4. `session/new` with the workspace as `cwd`, or `session/resume` / `session/load` for a follow-up.
+2. `initialize` with `protocolVersion: 1`. Advertise no file-system or terminal client
+   capabilities, so the agent uses its own tools.
+3. `authenticate` only with a non-interactive method named by the profile's `auth_method`. Hufu
+   never performs an interactive login; an agent that needs one fails with `auth_required`.
+4. `session/new` with the workspace as `cwd` and any MCP servers Hufu attaches, or `session/load`
+   / `session/resume` for a follow-up, depending on what the agent advertises.
 5. Read `configOptions`. Set the option of category `model` and the option of category
-   `thought_level` with `session/set_config_option` when the task asks for them. If the agent
-   advertises no such option, the capability is absent and the task was already rejected.
-6. `session/prompt`. Translate `session/update` notifications into normalized events.
-7. Answer every `session/request_permission` from the tier policy in [section 3.1](#31-mapping),
-   always with a once-only option, never "always".
+   `thought_level` with `session/set_config_option` when the task asks for them. Where the agent
+   advertises a plan-like mode, select it for `read-only` as a second control.
+6. `session/prompt`. Translate `session/update` notifications into normalized events; chunks of the
+   answer are joined into the final message.
+7. Answer every `session/request_permission` from the tier policy in [section 3.1](#31-mapping).
 8. Map `stopReason`: `end_turn` is completed; `cancelled` is cancelled; `refusal`, `max_tokens` and
    `max_turn_requests` are failed with the reason recorded.
-9. On abort: send `session/cancel`, answer any pending permission request with `cancelled`.
+9. On cancel: send `session/cancel`, give the agent the grace period, then stop the process tree.
 
 Agents expected to work through this profile with no adapter code: Gemini CLI, OpenCode, Goose,
 Qwen Code, Cursor, Kimi Code, pi (through `pi-acp`), Codex (through `codex-acp`), Claude (through
-`claude-agent-acp`), and DeepSeek Harness if its ACP server is confirmed.
+`claude-agent-acp`). None of them has been run against this client yet.
 
 ## 6. Conformance suite
 
-Every adapter must pass the same tests, run against a fake of its agent that replays recorded
-transcripts:
+Every adapter must pass the same checks, run against a fake of its agent
+(`hufu-testing/src/conformance.rs`; the fakes are in the same crate):
 
 | # | Assertion |
 |---|---|

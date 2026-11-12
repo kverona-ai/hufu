@@ -1,0 +1,31 @@
+[package]
+name = "hufu-cli"
+description = "Hufu: a multi-agent dispatch layer with a pluggable commander. Any agent holds the tally, any agent does the work"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "../../../README.md"
+keywords = ["agents", "cli", "acp", "mcp", "orchestration"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "hufu"
+path = "src/main.rs"
+
+[dependencies]
+hufu-contract.workspace = true
+hufu-adapters.workspace = true
+hufu-core.workspace = true
+hufu-mcp.workspace = true
+hufu-daemon.workspace = true
+hufu-testing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

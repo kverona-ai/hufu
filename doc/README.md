@@ -6,29 +6,32 @@ All project documents live in this directory. Code lives in [`src/`](../src/READ
 
 | If you want to know… | Read |
 |---|---|
+| How to install and use it | [User guide](guide/user-guide.md) |
 | What Hufu is for and what it must do | [Requirements](requirements/requirements.md) |
 | How the system is put together | [Architecture](architecture/architecture.md) |
-| What is built when | [Roadmap](roadmap.md) |
+| What is built and what is next | [Roadmap](roadmap.md) |
 
 ## Map
 
 ```text
 doc/
 ├── README.md                     this index
-├── roadmap.md                    milestones M0 to M5
+├── roadmap.md                    milestones M0 to M5 and what comes next
+├── guide/
+│   └── user-guide.md             every command, configuration reference, MCP tools, recipes
 ├── requirements/
 │   └── requirements.md           goals, users, scenarios, FR and NFR lists, open questions
 ├── research/
 │   ├── agent-landscape.md        how each agent is driven headlessly; ACP; verified facts
-│   ├── computer-use.md           reference study of LCU for the planned computer-use routing
+│   ├── computer-use.md           reference study of LCU for computer-use routing
 │   └── prior-art.md              existing orchestrators, positioning, the name
 ├── architecture/
 │   └── architecture.md           components, roles, job and mission lifecycles, security
 ├── technical/
-│   ├── technical-design.md       stack, source layout, config, task spec, CLI, store, missions, tests
+│   ├── technical-design.md       stack, crates, config, task spec, job store, runner, missions, MCP, tests
 │   └── adapter-contract.md       adapter interface, permission and effort mapping, per-agent notes
 ├── deployment/
-│   ├── deployment.md             install, configure, connect hosts, operate, troubleshoot
+│   ├── deployment.md             install, configure, connect hosts, operate, release
 │   └── cloud-environment.md      what cloud development sessions need
 ├── adr/                          architecture decision records
 ├── examples/                     sample configuration, task and mission files
@@ -36,6 +39,9 @@ doc/
 ```
 
 ## By category
+
+### Using Hufu
+- [User guide](guide/user-guide.md)
 
 ### Requirements
 - [Requirements](requirements/requirements.md)

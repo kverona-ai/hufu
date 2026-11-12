@@ -1,18 +1,23 @@
 # Contributing to Hufu
 
-Thank you for your interest. Hufu is in its design phase: the documents under [`doc/`](doc/README.md)
-are the product right now, and feedback on them is the most useful contribution.
+Thank you for your interest. Hufu 0.1 is implemented and tested against built-in fake agents. The
+most useful contribution right now is a report from a run against a real agent: what you ran
+(`hufu run ... --dry-run` shows the exact command line), what the agent printed
+(`hufu logs <job> --raw`), and what Hufu made of it (`hufu --json result <job>`). Remove anything
+private from the output first.
 
 ## Where things go
 
 | Kind of change | Location |
 |---|---|
 | Documents of any kind | [`doc/`](doc/README.md), in the matching category folder, and listed in `doc/README.md` |
-| Code, tests, package manifests | [`src/`](src/README.md) |
+| Code, tests, package manifests, install scripts | [`src/`](src/README.md) |
+| CI and release workflows | `.github/workflows/` |
 | Sample configuration and specs | `doc/examples/` |
 | Images | `doc/assets/` |
 
-The repository root holds only the READMEs, the licence and repository metadata.
+The repository root holds only the READMEs, the licence and repository metadata (which includes
+`.github/`, because GitHub reads workflows from nowhere else).
 
 ## Proposing a change
 
@@ -31,14 +36,20 @@ The repository root holds only the READMEs, the licence and repository metadata.
 - Diagrams are Mermaid blocks inside the Markdown file.
 - Check that relative links resolve before opening a pull request.
 
-## Writing code (from M1)
+## Writing code
 
-- Hufu is written in Rust. Follow the crate dependency rules in [`src/README.md`](src/README.md),
-  and keep `cargo fmt` and `cargo clippy` clean.
+- Hufu is written in Rust. Build and test commands, the layout and the crate dependency rules are in
+  [`src/README.md`](src/README.md). Keep `cargo fmt --all --check` and
+  `cargo clippy --all-targets -- -D warnings` clean.
 - A new adapter must pass the conformance suite described in the
-  [adapter contract](doc/technical/adapter-contract.md#6-conformance-suite).
-- Tests in the default suite must not need a real agent, a login or the network.
+  [adapter contract](doc/technical/adapter-contract.md#6-conformance-suite), and comes with a fake
+  agent that speaks the real agent's output format.
+- A change in behaviour comes with an end-to-end test under `src/crates/hufu-cli/tests/e2e/`.
+- Tests must not need a real agent, a login or the network, and must pass on Linux, macOS and
+  Windows. CI runs all three.
 - Never read, copy or log an agent's stored credentials.
+- A change that users can see updates the [user guide](doc/guide/user-guide.md) and, where it
+  applies, both READMEs, in the same pull request.
 
 ## Commit messages
 

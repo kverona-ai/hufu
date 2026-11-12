@@ -2,32 +2,34 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review. Nothing here is implemented yet |
-| **Last updated** | 2026-11-12 (Rust, capability routing) |
-| **Related** | [Architecture](../architecture/architecture.md), [Adapter contract](adapter-contract.md), [Requirements](../requirements/requirements.md) |
+| **Status** | Describes Hufu 0.1 as implemented |
+| **Last updated** | 2026-11-12 (rewritten after implementation: synchronous core, own protocol clients, accounts and pools, setup, daemon, three platforms) |
+| **Related** | [Architecture](../architecture/architecture.md), [Adapter contract](adapter-contract.md), [Requirements](../requirements/requirements.md), [User guide](../guide/user-guide.md) |
 
 This document turns the [architecture](../architecture/architecture.md) into concrete formats and
-behaviours: the source layout, configuration, the task spec, the CLI, the on-disk store, the event
-and result shapes, the mission protocol and the test strategy. How individual agents are driven is
-in the [adapter contract](adapter-contract.md).
+behaviours: the source layout, configuration, the task spec, the on-disk store, the event and
+result shapes, the runner, the mission protocol, the MCP server and the test strategy. How
+individual agents are driven is in the [adapter contract](adapter-contract.md). How to use the
+result is in the [user guide](../guide/user-guide.md).
 
 ## 1. Stack
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Language | Rust, stable toolchain, edition 2024 | [ADR-0007](../adr/0007-implement-in-rust.md) |
-| Async runtime | Tokio | Subprocesses, pipes, signals and timers |
-| CLI | `clap` | |
-| Serialization | `serde`, `serde_json`; a maintained YAML crate to be picked in M1 | The original `serde_yaml` crate is deprecated |
-| Schemas | `schemars` | JSON Schema generated from the same Rust types that parse config, task specs and CLI output |
-| ACP client | `agent-client-protocol` | Official Rust SDK |
-| MCP server | `rmcp` | Official Rust SDK. M4 |
-| Process control | Tokio process plus `nix` | Detached sessions, process groups, signal delivery |
-| Pseudo-terminal | `portable-pty`, only if the `agy` adapter needs it | See [adapter contract](adapter-contract.md#52-antigravity-agy-cli) |
-| Tests | `cargo test`; `assert_cmd` for command-level tests | Fake agents are small binaries in the testing crate |
-| Distribution | One static `hufu` binary per platform | See [deployment](../deployment/deployment.md#3-install) |
+| Language | Rust, edition 2024, minimum version 1.89 | [ADR-0007](../adr/0007-implement-in-rust.md) |
+| Concurrency | Threads and blocking I/O. No async runtime | [ADR-0009](../adr/0009-synchronous-core-and-own-protocol-clients.md) |
+| CLI | `clap` (derive) | |
+| Serialization | `serde`, `serde_json`; `serde-saphyr` for YAML | YAML 1.2 rules: only `true` and `false` are booleans, so a profile named `y` or `no` stays a string |
+| JSON Schema | A validator written for Hufu, covering the subset that agents' structured output uses | `hufu-core/src/schema.rs` |
+| ACP client | Written for Hufu on `serde_json`: JSON-RPC 2.0 over the agent's stdio, protocol version 1 | [ADR-0009](../adr/0009-synchronous-core-and-own-protocol-clients.md) |
+| MCP server | Written for Hufu on `serde_json`: newline-delimited JSON-RPC over stdio | Same record |
+| Process control | `std::process`, plus `libc` on Unix and `windows-sys` on Windows | All platform differences are in `hufu-contract/src/proc.rs` |
+| Randomness | `getrandom`, for ids | |
+| Tests | `cargo test`. End-to-end tests run the built binary against fake agents that live in the binary itself | Section 13 |
+| Distribution | One `hufu` binary per platform; static on Linux | [Deployment](../deployment/deployment.md#3-install) |
 
-The toolchain version is pinned in `rust-toolchain.toml`.
+That is the whole dependency list. The release profile optimizes for size, uses thin LTO and strips
+symbols; a release binary is about 4 MB.
 
 ## 2. Source layout
 
@@ -36,177 +38,158 @@ Cargo workspace. The repository root holds only documentation and repository met
 
 ```text
 src/
-├── Cargo.toml              # workspace manifest
-├── Cargo.lock
-├── rust-toolchain.toml
+├── Cargo.toml  Cargo.lock  rustfmt.toml
 ├── crates/
-│   ├── hufu-cli/           # the `hufu` binary: commands, human and JSON output, exit codes
+│   ├── hufu-contract/      # what adapters and the core share; depends on nothing of Hufu's
+│   │   └── src/            # types (Adapter trait, Profile, Capabilities, RunRequest, RunOutcome),
+│   │                       # event, proc (processes on three platforms), time, json
+│   ├── hufu-adapters/      # one module per adapter
+│   │   └── src/            # codex_cli, agy_cli, cursor_cli, claude_cli, kimi_cli, pi, acp,
+│   │                       # external, common
 │   ├── hufu-core/          # everything agent-agnostic
 │   │   └── src/
-│   │       ├── spec/       # task spec, config and result types; validation
-│   │       ├── registry/   # profiles, adapter lookup, capability cache
-│   │       ├── store/      # job and mission directories, atomic writes
-│   │       ├── runner/     # detached per-job runner: lifecycle, heartbeat, timeout, cancel
-│   │       ├── scheduler/  # queue, concurrency slots, dependency release
-│   │       ├── workspace/  # cwd resolution, git worktrees, change detection
-│   │       ├── tally/      # acceptance checks
-│   │       └── mission/    # advisor loop, plan and verdict handling, budgets
-│   ├── hufu-contract/      # the Adapter trait and the types shared with adapters
-│   ├── hufu-adapters/      # one module per adapter
-│   │   └── src/            # acp, codex_cli, agy_cli, cursor_cli, kimi_cli, pi, claude_cli
-│   ├── hufu-mcp/           # MCP shell (M4)
-│   ├── hufu-daemon/        # daemon (M4)
-│   └── hufu-testing/       # fake agents, recorded transcripts, conformance suite
+│   │       ├── config      # config files, merge, validation, editing
+│   │       ├── spec        # task spec and the normalized job spec
+│   │       ├── submit      # validation, profile and pool resolution, launching runners
+│   │       ├── runner      # one process per job: slot, attempts, heartbeat, timeouts, result
+│   │       ├── slots       # concurrency limits as files
+│   │       ├── store       # job directories, atomic writes, lost-job detection
+│   │       ├── workspace   # git worktrees, change detection
+│   │       ├── tally       # acceptance checks
+│   │       ├── schema      # JSON Schema validation
+│   │       ├── capability  # computer-use routing, grants, pre-flight
+│   │       ├── mission     # advisor loop, plan and verdict handling, budgets
+│   │       ├── setup       # registering with host agents
+│   │       ├── doctor      # health check and self-test
+│   │       └── ops         # configuration edits and pruning shared by CLI and MCP
+│   ├── hufu-mcp/           # MCP server
+│   ├── hufu-daemon/        # optional daemon
+│   ├── hufu-testing/       # fake agents and the conformance suite
+│   └── hufu-cli/           # the `hufu` binary: commands, human and JSON output, exit codes
+│       └── tests/e2e/      # end-to-end tests
+├── install/                # install.sh, install.ps1
 └── integrations/
-    └── claude-code/        # skill and CLAUDE.md snippet shipped with releases
+    └── claude-code/        # skill and CLAUDE.md snippet
 ```
 
 Dependency rule, enforced by the crate graph: `hufu-core` and `hufu-adapters` each depend on
-`hufu-contract` and not on each other. `hufu-cli`, `hufu-mcp` and `hufu-daemon` depend on
-`hufu-core` and wire the adapters in.
+`hufu-contract` and not on each other. `hufu-mcp` and `hufu-daemon` depend on `hufu-core`.
+`hufu-cli` depends on all of them and wires the adapters in through the `AdapterRegistry` trait.
 
 ## 3. Configuration
 
-Two files, merged with the project file winning:
+Two files, merged key by key with the project file winning:
 
 | File | Scope |
 |---|---|
 | `~/.hufu/config.yaml` (or `$HUFU_HOME/config.yaml`) | User-wide profiles and defaults |
-| `<project>/.hufu/config.yaml` | Project overrides; safe to commit because it holds no secrets |
+| `<project>/.hufu/config.yaml` | Project overrides; safe to commit because it holds no secrets. Found by walking up from the workspace |
 
-A full sample is in [`doc/examples/config.yaml`](../examples/config.yaml).
+Under both lie the **presets**: one profile per supported agent (`codex`, `agy`, `cursor`,
+`claude`, `kimi`, `pi`, `cursor-acp`, `kimi-acp`), so that an installed agent works with an empty
+configuration. A profile of the same name in a file replaces the preset.
 
-```yaml
-version: 1
-
-defaults:
-  permission: read-only     # least privilege unless a task says otherwise
-  effort: default           # do not pass any effort flag
-  timeout: 30m
-  inactivity_timeout: 10m
-  isolation: none           # or: worktree
-
-limits:
-  max_concurrent_jobs: 4
-  per_profile:
-    codex-high: 2
-
-profiles:
-  codex-high:
-    adapter: codex-cli
-    model: gpt-6.1-sol
-    effort: high
-
-  kimi:
-    adapter: acp
-    command: [kimi, acp]
-
-  or-reasoner:
-    adapter: pi
-    provider: openrouter
-    model: vendor/model-slug
-    effort: high
-    env: [OPENROUTER_API_KEY]   # names of variables to pass through, never values
-```
+A full, test-checked sample is [`doc/examples/config.yaml`](../examples/config.yaml); the key
+reference is in the [user guide](../guide/user-guide.md#11-configuration-reference). The top-level
+keys are `version`, `defaults`, `limits`, `roles`, `profiles`, `pools`, `capabilities`, `missions`
+and `retention`.
 
 Profile fields:
 
 | Field | Applies to | Meaning |
 |---|---|---|
 | `description` | all | One line shown in listings and given to a managed advisor as part of the roster |
-| `adapter` | all | Adapter kind: `acp`, `codex-cli`, `agy-cli`, `cursor-cli`, `kimi-cli`, `pi`, `claude-cli` |
-| `command` | `acp` | Argv that starts the agent in ACP mode. For CLI adapters, an optional override of the binary path |
+| `adapter` | all | `codex-cli`, `agy-cli`, `cursor-cli`, `claude-cli`, `kimi-cli`, `pi`, `acp`, `external` |
+| `command` | `acp`, `external`; optional elsewhere | Argv that starts the agent. For CLI adapters, an override of the program |
 | `model` | all | Default model id, passed through verbatim |
 | `provider` | `pi` | Provider name as pi knows it |
-| `effort` | all | Default effort level |
-| `effort_fallback` | all | `error` (default) or `nearest`. See [adapter contract, section 4](adapter-contract.md#4-effort-mapping) |
-| `permission` | all | Default tier for this profile. Cannot be `full-access` unless `allow_full_access: true` is also set |
+| `effort`, `effort_fallback` | all | Default effort; `error` (default) or `nearest`. See [adapter contract, section 4](adapter-contract.md#4-effort-mapping) |
+| `permission`, `allow_full_access` | all | Default tier for this profile. `full-access` as a default needs `allow_full_access: true` |
+| `account` | all | A label for the account, shown in listings and in results |
+| `home` | adapters with a home variable | The agent's own configuration and login directory. The adapter turns it into `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CURSOR_CONFIG_DIR`, `KIMI_CODE_HOME` or `PI_CODING_AGENT_DIR` |
 | `env` | all | Names of environment variables the agent process may inherit |
-| `permission_requests` | `acp` | `unverified` (default) or `verified`. Tiers below `full-access` are advertised only when `verified`. See [adapter contract, section 3.1](adapter-contract.md#31-mapping) |
+| `env_from` | all | `{AGENT_VAR: SHELL_VAR}`: the agent sees the first name with the value of the second |
+| `vars` | all | Literal variables. A key or value that looks like a secret is refused |
 | `args` | all | Extra arguments appended verbatim. An escape hatch; adapters reject arguments that would change the permission tier |
+| `provides` | all | `{computer_use: {via: native \| lcu \| <name>, check: [argv]}}`. Section 12 |
+| `permission_requests`, `allow_execute`, `auth_method` | `acp` | `unverified` (default) or `verified`; command prefixes allowed at `workspace-write`; the `authenticate` method to call. See [adapter contract, section 3.1](adapter-contract.md#31-mapping) |
 
-A top-level `missions` block sets mission defaults: the review policy, the highest tier any
-mission task may request, and the commands an advisor-written acceptance check may run. See
-[section 9](#9-missions-the-managed-advisor-loop).
+**Validation** reports every problem at once: unknown adapters, roles and pools naming profiles
+that do not exist, an advisor that is a pool, a computer-use agent that does not declare the
+capability, unparseable durations, secrets in `vars`, `full-access` defaults without the opt-in.
+Unknown keys and YAML errors are refused when the file is read. A configuration with problems
+still serves the read-only commands (`agents`, `doctor`, `config`, `status`), so that it can be
+repaired with Hufu itself, but no job or mission starts from it.
+
+**Editing.** `hufu config set`, `hufu profile ...`, `hufu pool ...` and the MCP configuration tools
+all go through `hufu-core/src/ops.rs`: the file is read as a document, the change is applied, the
+result merged with the other file is validated, and only then is it written, atomically. An edit
+to the project file is validated together with the user-wide file it builds on. Comments in a
+hand-written file are not preserved by an edit.
+
+### 3.1 Accounts and pools
+
+- A **profile** is the unit of "one agent, one model, one account". Several profiles may use the
+  same adapter. Accounts are told apart by `home` (a separate login directory) or by `env` /
+  `env_from` (a separately named API key). Hufu holds names and paths, never credentials.
+- A **pool** has `members` (profiles) and a `strategy`. Wherever a task names an agent, it may name
+  a pool. At submission Hufu orders the members by strategy: `failover` keeps the listed order,
+  `round-robin` rotates the starting point (a counter in `run/rr-<pool>`), `least-busy` sorts by
+  running jobs. The runner then tries them in that order and moves to the next member only when
+  one fails with `agent_unavailable`, `auth_required` or `rate_limited`. The profile that actually
+  ran is recorded in the state and the result.
+- `roles.advisor` is one profile. `roles.executors` is a list of profiles and pools; its first
+  entry is the default agent of `hufu run`.
 
 ## 4. Task spec
 
-A task can be given as flags, as a file (`-f task.yaml`), or both, with flags overriding the file.
-Samples are in [`doc/examples/`](../examples/).
-
-```yaml
-version: 1
-title: Refactor token refresh
-prompt: |
-  Refactor the token refresh logic under src/auth so that concurrent refreshes
-  share one in-flight request. Keep the public API unchanged. Run the unit tests.
-agent: codex-high
-cwd: .
-permission: workspace-write
-effort: high
-timeout: 45m
-isolation: worktree
-output:
-  schema: ./schemas/change-summary.json
-acceptance:
-  - command: npm test -- auth
-  - paths:
-      allow: ["src/auth/**", "test/auth/**"]
-```
+A task can be given as flags, as a file (`-f task.yaml`, YAML or JSON), or both, with flags
+overriding the file. A test-checked sample is [`doc/examples/task.yaml`](../examples/task.yaml).
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
-| `version` | yes | | Spec version. Currently `1` |
 | `prompt` | yes | | The instruction given to the agent |
-| `agent` | yes | | Profile name |
+| `agent` | no | First of `roles.executors` | A profile or pool |
+| `version` | no | `1` | Spec version |
 | `title` | no | First line of the prompt | Shown in listings |
 | `cwd` | no | Caller's directory | Workspace root for the agent |
 | `permission` | no | Profile, then global default | `read-only`, `workspace-write`, `full-access` |
-| `effort` | no | Profile, then global default | `off`, `low`, `medium`, `high`, `max`, `default` |
+| `effort` | no | Profile, then global default | `off`, `low`, `medium`, `high`, `max`, `default`, `native:<value>` |
 | `model` | no | Profile | Overrides the profile's model |
-| `timeout` | no | Global default | Wall-clock limit enforced by Hufu |
+| `timeout` | no | Global default | Wall-clock limit per attempt, enforced by Hufu |
 | `inactivity_timeout` | no | Global default | Limit on silence from the agent |
-| `isolation` | no | `none` | `worktree` runs the task on a new branch in a new git worktree |
-| `output.schema` | no | | JSON Schema for the final answer; requires a profile that supports structured output |
+| `isolation` | no | Global default (`none`) | `worktree` runs the task on a new branch in a new git worktree |
+| `output.schema` | no | | JSON Schema for the final answer: inline, or a path |
 | `acceptance` | no | | Tally checks. See [section 10](#10-tally-checks) |
-| `strict_permissions` | no | `true` | When `true`, any denied action fails the job |
-| `depends_on` | no | | Job ids that must succeed first. Used by missions |
-| `labels` | no | | Free-form key/value pairs for filtering |
-| `grants` | no | none | Capabilities beyond the workspace that this task may use, each with its scope. Planned; see [section 14](#14-capability-routing-planned) |
+| `strict_permissions` | no | `false` | When `true`, any denied action fails the job |
+| `depends_on` | no | | Job ids that must succeed, and not be rejected, first |
+| `retry` | no | Global default | `{max_attempts, on: [reasons], backoff}` |
+| `labels` | no | | Free-form key/value pairs |
+| `grants` | no | none | Capabilities beyond the workspace, each with its scope. Section 12 |
+| `computer_use` | no | | `{route, agent}`: a per-task override of the routing |
 
-**Validation order.** Schema, then profile resolution, then capability checks (tier, effort, model,
-structured output, resume), then workspace checks (directory exists; a git repository if
-`isolation: worktree`). Any failure rejects the submission with exit code `2` and creates no job.
+**Validation order.** The configuration as a whole, then the spec, then profile or pool
+resolution, then capability checks against what the adapter declares (tier, effort, resume, where
+the tier may come from), then computer-use routing and pre-flight, then workspace checks (the
+directory exists; a git repository if `isolation: worktree`). Any failure refuses the submission
+with exit code `2` and creates no job. `--dry-run` runs all of it and prints the launch plan.
+
+The validated task is written once as `spec.json`: every default applied, the resolved profile
+embedded, the order of pool members fixed. A runner needs nothing but that file and the
+configuration's limits.
 
 ## 5. Command-line interface
 
-```text
-hufu run [-f task.yaml] [--agent P] [--permission T] [--effort E] [--model M]
-         [--cwd DIR] [--isolation worktree] [--timeout D] [--wait] [--json] [PROMPT]
-hufu status [JOB...] [--all] [--json]
-hufu wait JOB... [--timeout D] [--any] [--json]
-hufu result JOB [--full] [--json]
-hufu logs JOB [--follow] [--raw]
-hufu cancel JOB...
-hufu resume JOB PROMPT [--wait] [--json]
-hufu agents [PROFILE] [--json]
-hufu doctor [--json]
-hufu prune [--older-than D] [--keep N] [--worktrees]
+The command reference is in the [user guide](../guide/user-guide.md); `hufu <command> --help` is
+generated from the same definitions. What matters to callers that are agents or scripts:
 
-hufu mission start --advisor P [--executors P,P] [--budget ...] GOAL      # M3
-hufu mission status|report|pause|resume|abort MISSION                     # M3
-hufu mcp                                                                  # M4
-hufu daemon start|stop|status                                             # M4
-```
-
-Behaviour that matters to agent callers:
-
-- `hufu run` prints the job id and returns as soon as the job is recorded. `--wait` blocks until a
-  terminal state and prints the result.
-- `hufu result` is compact by default: state, verdict, final message trimmed to a configurable
-  length, changed files, denied actions, warnings. `--full` returns everything.
-- `--json` output is a single object with a `v` field. Human output goes to stdout; diagnostics go
-  to stderr.
+- `hufu run` prints the job id and returns as soon as the job is recorded and its runner started.
+  `--wait` blocks until a terminal state and prints the result.
+- `hufu result` is compact by default: state, verdict, final message clipped to
+  `defaults.result_chars`, changed files, denied actions, warnings. `--full` returns everything.
+- `--json` makes every command print one document with a `v` field. An error is then
+  `{"v": 1, "error": {"kind", "message"}}` with the usual exit code.
+- Every error message says what was wrong, where, and what would be accepted.
 
 ### Exit codes
 
@@ -214,7 +197,7 @@ Behaviour that matters to agent callers:
 |---|---|
 | `0` | Success. For `run --wait`, `wait` and `result`: the job succeeded and was not rejected |
 | `1` | Internal error in Hufu |
-| `2` | Usage or validation error. Nothing was run |
+| `2` | Usage, validation or configuration error. Nothing was run |
 | `3` | Job failed |
 | `4` | Job cancelled |
 | `5` | Job timed out |
@@ -232,29 +215,40 @@ Behaviour that matters to agent callers:
 ├── config.yaml
 ├── jobs/
 │   └── j_7k2m9x4qpd/
-│       ├── spec.json          # normalized task spec, written once
+│       ├── spec.json          # normalized task, written once
 │       ├── state.json         # current state, rewritten atomically
 │       ├── events.ndjson      # normalized events, append-only
-│       ├── result.json        # written once, at the terminal state
+│       ├── result.json        # written once, just before the terminal state
 │       ├── tally.json         # acceptance check outcomes, if any
+│       ├── children.ndjson    # child jobs, for computer-use hand-overs
+│       ├── cancel.request     # present once cancellation was asked for
+│       ├── runner.log         # the runner's own stderr
 │       └── raw/
 │           ├── stdout.log     # the agent's output, untouched
 │           └── stderr.log
 ├── missions/
 │   └── m_3f8h1c5tzn/
-│       ├── mission.json       # goal, advisor, roster, budgets
+│       ├── mission.json       # goal, advisor, roster, budgets, tasks and their state
 │       ├── plan.json          # the validated plan
 │       ├── ledger.ndjson      # every dispatch, check outcome and verdict
-│       └── report.md
+│       ├── report.md
+│       ├── driver.log
+│       └── pause.request, abort.request
+├── worktrees/                 # git worktrees of isolated jobs and missions
 └── run/
-    └── slots/                 # one file per live runner; used for advisory limits before M4
+    ├── slots/                 # one file per live runner
+    ├── rr-<pool>              # round-robin counters
+    └── daemon.json, daemon.log, daemon.stop
 ```
 
 - **Ids** are short and time-sortable, prefixed `j_` for jobs and `m_` for missions.
-- **Atomicity.** `state.json` and `result.json` are written to a temporary file and renamed.
-  `events.ndjson` is appended one complete line at a time.
-- **`state.json`** holds the state, runner pid, start time, heartbeat time, attempt number and the
-  resolved agent version.
+- **Atomicity.** JSON files are written to a temporary sibling and renamed over the target.
+  `events.ndjson` is appended one complete line at a time. Reads retry briefly, because on Windows
+  a rename can collide with a reader for a moment.
+- **`state.json`** holds the state, verdict, reason, the profile that is running, runner and agent
+  process ids, times, heartbeat, attempt number, last activity and the resolved agent version.
+- **Ordering.** `result.json` is written before `state.json` turns terminal, so a waiter that sees
+  a terminal state always finds the result.
 - **No secrets.** `spec.json` records the names of passed-through environment variables, not values.
 
 ## 7. Events and results
@@ -287,8 +281,9 @@ Every adapter emits the same event types. Each line of `events.ndjson` is one ev
   "job": "j_7k2m9x4qpd",
   "state": "succeeded",
   "verdict": "accepted",
+  "title": "Share one in-flight token refresh",
   "agent": {
-    "profile": "codex-high", "adapter": "codex-cli", "version": "0.167.2",
+    "profile": "codex-work", "adapter": "codex-cli", "account": "work", "version": "0.167.2",
     "model": "gpt-6.1-sol", "effort": "high", "permission": "workspace-write"
   },
   "final_message": "Refactored refresh() to share one in-flight promise. 14 tests pass.",
@@ -299,34 +294,63 @@ Every adapter emits the same event types. Each line of `events.ndjson` is one ev
   },
   "denied_actions": [],
   "warnings": [],
+  "tally": [{"check": "command", "description": "npm test -- auth", "passed": true, "duration_ms": 8412}],
   "usage": {"input_tokens": 48211, "output_tokens": 3907},
   "session": {"id": "…", "resumable": true},
-  "timing": {"queued_at": "…", "started_at": "…", "finished_at": "…", "duration_s": 312}
+  "timing": {"queued_at": "…", "started_at": "…", "finished_at": "…", "duration_s": 312},
+  "attempts": 1
 }
 ```
 
-`changes.files` comes from comparing the git state of the workspace before and after the job when
-the workspace is a repository, and from `edit`, `delete` and `move` tool events otherwise.
+A failed job also has `reason` (one of the reason codes in the
+[adapter contract](adapter-contract.md#21-failure-reasons)) and `detail`. A job that handed over
+computer-use steps lists them under `children`; a mission's job carries `mission`.
+
+`changes.files` comes from comparing the workspace before and after the job: the git state when
+the workspace is a repository; otherwise sizes and modification times of up to 20,000 files; and
+beyond that only the paths the agent reported in `edit`, `delete` and `move` events. Paths are
+relative to the workspace.
 
 ## 8. Runner mechanics
 
-1. **Detach.** `hufu run` spawns `hufu __runner <job>` as a detached process in its own session,
-   with stdio redirected to files, and does not wait for it.
-2. **Slot.** The runner takes a slot file. If the configured limit is reached it stays `queued` and
-   polls. From M4 the daemon's queue replaces this.
-3. **Launch.** The runner resolves the workspace, builds the run request and calls the adapter.
-   The agent's environment is a small base set (`PATH`, `HOME`, locale, temp directory, proxy
-   variables) plus the variables the profile lists.
-4. **Heartbeat.** Every five seconds the runner rewrites `state.json` with a fresh timestamp.
-5. **Timeouts.** A wall-clock timer and an inactivity timer run in the runner. Either one firing
-   cancels the agent and ends the job as `timed_out`.
-6. **Cancel.** `hufu cancel` writes a cancel marker and signals the runner. The runner asks the
-   adapter to stop (ACP `session/cancel`, or `SIGTERM` to the agent's process group), waits ten
-   seconds, then sends `SIGKILL` to the group.
-7. **Finish.** The runner computes changes, writes `result.json`, runs tally checks if the task has
-   any, writes the terminal state and releases its slot.
-8. **Lost jobs.** Any command that reads a non-terminal job with a heartbeat older than thirty
-   seconds and no live process at the recorded pid rewrites it as `lost`.
+1. **Detach.** `hufu run` starts `hufu __runner <job>` as a detached process and does not wait for
+   it: its own session on Unix, its own hidden console and process group on Windows, with output
+   going to `runner.log`. On Windows the caller's standard handles are made non-inheritable first,
+   because otherwise the runner would keep the caller's output pipe open and whoever reads
+   `hufu run`'s output would wait for the whole job.
+2. **Dependencies.** The runner waits until every job in `depends_on` has succeeded; one that
+   failed or was rejected ends this job with `dependency_failed`.
+3. **Slot.** The runner takes a slot file under a short-lived lock, subject to the global limit,
+   the per-profile limit and, for computer use, the display limit. Until there is room the job
+   stays `queued`. Slot files of dead processes are removed by whoever reads them. With the daemon
+   running, jobs are left for it to start, in submission order (section 14).
+4. **Launch.** The runner resolves the workspace (creating the worktree if asked), takes a snapshot
+   of it, builds the run request and calls the adapter. The agent's environment is a small fixed
+   set (`PATH`, home, locale, temp directory, proxy and certificate variables, the Windows system
+   variables) plus what the profile names; a variable named in `env_from` that is not set fails
+   the attempt with `auth_required`, naming the variable.
+5. **Pool members and retries.** A member that fails with `agent_unavailable`, `auth_required` or
+   `rate_limited` is followed by the next member. A failure whose reason is in the retry policy is
+   retried after the backoff, up to `max_attempts`.
+6. **Heartbeat.** Every five seconds a watchdog thread rewrites `state.json` with a fresh
+   timestamp.
+7. **Timeouts.** The watchdog also holds a wall-clock timer per attempt and an inactivity timer.
+   Either one firing cancels the agent and ends the job as `timed_out`.
+8. **Cancel.** `hufu cancel` writes `cancel.request`; the watchdog sees it within a second. The
+   adapter is asked to stop: ACP `session/cancel`, or `SIGTERM` to the agent's process group. After
+   the grace period (ten seconds) the whole tree is killed: the process group and, found through
+   the process table, descendants that left it. On Windows there is no polite signal for a hidden
+   console process, so the tree is ended at once with `taskkill /T /F`. `--force` kills from the
+   outside without waiting.
+9. **Finish.** The runner computes changes, enforces the tier (`tier_violated` for a read-only job
+   that changed files), validates structured output, runs the tally checks, writes `result.json`,
+   then the terminal state, and releases its slot.
+10. **Lost jobs.** Any command that reads a non-terminal job whose heartbeat is older than thirty
+    seconds and whose runner process is gone rewrites it as `lost` with reason `runner_died`. A
+    zombie process counts as gone. The agent of a lost job is not killed automatically: its
+    process id may have been reused, and a wrong kill is worse than a leftover.
+11. **Bugs.** A panic in the runner is caught and ends the job as `failed` with `internal_error`,
+    so that a bug in Hufu does not look like a crash of the machine.
 
 ## 9. Missions: the managed advisor loop
 
@@ -372,14 +396,24 @@ for JSON.
 ```
 
 Hufu validates the plan the same way it validates a task spec, plus: ids are unique, the dependency
-graph has no cycle, every agent is on the roster, and no task exceeds the mission's maximum tier.
-An invalid plan is sent back once with the errors; a second invalid plan fails the mission.
+graph has no cycle, every agent is on the roster (a profile or a pool), no task exceeds the
+mission's maximum tier, every acceptance command starts with an allowed prefix, and every grant is
+inside `allowed_grants`. An invalid plan, or an answer that is not JSON, is sent back once with the
+errors; a second one fails the mission with `plan_invalid`.
+
+Optional fields may be left out or given as `null`. Agents with native structured output are given
+a schema in which every property is required but nullable, because that is the only form some of
+them accept; Hufu fills in absent nullable properties before validating.
+
+Tasks whose dependencies are met run side by side up to `max_parallel`. A goal the advisor answers
+with an empty plan becomes a single task for the first executor.
 
 ### 9.3 Getting JSON out of an agent
 
 In order of preference: the agent's own structured-output feature (Codex `--output-schema`,
-Antigravity `--json-schema`); otherwise an instruction to answer with a single fenced JSON block,
-which Hufu extracts and validates.
+Antigravity and Claude Code `--json-schema`); otherwise an instruction appended to the prompt to
+answer with a single fenced JSON block, which Hufu extracts and validates. Either way the answer is
+validated by Hufu's own JSON Schema validator, and a mismatch fails the job with `invalid_output`.
 
 ### 9.4 Review
 
@@ -397,14 +431,27 @@ returns:
 | `revise` | The follow-up is sent to the same session if the agent can resume, otherwise as a new job with the earlier result attached. Counts against the task's round limit |
 | `abort` | The mission stops and reports |
 
-Whether the advisor reviews every result or only failures is configurable per mission
-(`review: always | on_failure`); see open question Q4 in the
-[requirements](../requirements/requirements.md#11-open-questions).
+Whether the advisor reviews every result is configurable per mission: `review: always`,
+`on_failure` (the default: only results whose checks failed or whose job failed) or `never`.
+A task whose automatic checks fail is not accepted because the advisor said `accept`.
+
+The review is a follow-up in the advisor's planning session where the agent can resume, so the
+advisor still knows its own plan; the follow-up carries the review schema instead of the plan
+schema.
 
 ### 9.5 Budgets
 
 `max_rounds_per_task`, `max_tasks`, `max_wall_clock`, and `max_tokens` or `max_cost` where usage is
 reported. The first one exhausted stops the mission. Finished work is kept.
+
+### 9.6 The driver
+
+A mission is driven by its own detached process, `hufu __mission <id>`, which holds no state that
+is not also in `mission.json` and `ledger.ndjson`. That is what makes `pause`, `resume` and
+recovery after a restart the same operation: a new driver reads the files and continues, and
+finished tasks are not repeated. `pause` lets running jobs finish; `abort` cancels them. With
+`isolation: worktree` the whole mission works in one worktree on branch `hufu/<mission>`. When the
+mission ends, the driver writes `report.md`.
 
 ## 10. Tally checks
 
@@ -416,132 +463,192 @@ the verdict to be `accepted`.
 | `command: <shell>` | The command exits `0` within its timeout |
 | `paths: {allow: [...], deny: [...]}` | Every changed file matches an `allow` glob and none matches a `deny` glob |
 | `schema: <file>` | The structured output validates against the schema |
-| `no_denied_actions: true` | The agent reported no skipped actions (implied by `strict_permissions`) |
+| `no_denied_actions: true` | The agent reported no skipped actions. `strict_permissions: true` goes further and fails the job itself |
 | `review: advisor` | The mission's advisor returns `accept`. Only valid inside a mission |
 
 Check commands run with the caller's privileges, not the agent's tier, so they are part of the
-trusted task spec. In a mission, checks written by the advisor are limited to an allow-list of
-commands defined in configuration.
+trusted task spec. In a mission, checks written by the advisor are limited to commands that start
+with a prefix from `missions.acceptance_commands`. A command has a ten-minute limit unless the
+check sets `timeout`. Outcomes are stored in `tally.json` and in the result.
 
-## 11. MCP shell (M4)
+Independently of any check, a `read-only` job that changed files fails with `tier_violated`.
 
-`hufu mcp` is a stdio MCP server and a thin client of the daemon.
+## 11. MCP server
 
-| Tool | Returns |
+`hufu mcp` is a stdio MCP server. It is not a client of the daemon: it calls the same functions as
+the CLI, so it works with or without one.
+
+| Group | Tools |
 |---|---|
-| `hufu_submit` | A job id, immediately |
-| `hufu_status` | State of one or more jobs |
-| `hufu_wait` | Blocks for at most a bounded time (default 60 s), then returns the current state |
-| `hufu_result` | The compact result; `full: true` for everything |
-| `hufu_cancel` | Confirmation |
-| `hufu_agents` | Profiles and capabilities |
+| Dispatch | `hufu_agents`, `hufu_submit`, `hufu_status`, `hufu_wait`, `hufu_result`, `hufu_logs`, `hufu_cancel`, `hufu_resume` |
+| Missions | `hufu_mission_start`, `hufu_mission_status`, `hufu_mission_pause`, `hufu_mission_resume`, `hufu_mission_abort` |
+| Configuration | `hufu_config_get`, `hufu_config_set`, `hufu_profile_set`, `hufu_profile_remove`, `hufu_pool_set`, `hufu_pool_remove`, `hufu_init`, `hufu_setup` |
+| Health | `hufu_doctor` |
 
-No tool call ever lasts as long as a job. That keeps Hufu inside every host's tool-call timeout.
+- **No tool call lasts as long as a job.** `hufu_submit` returns the id at once. `hufu_wait` blocks
+  for a bounded time (default 50 s, at most 600 s) and then answers `wait_timed_out: true`, which
+  its description tells the caller to read as "still running".
+- **Results are structured.** A tool answers with text and, for objects, the same value as
+  `structuredContent`. Failures are tool results with `isError: true` and Hufu's error kind, so
+  the calling model can read and react to them; protocol errors are reserved for the protocol.
+- **Configuration tools** make the same validated edits as the CLI. `hufu_setup` without a list of
+  agents registers with every agent found, exactly like `hufu setup`.
+- **Protocol.** Newline-delimited JSON-RPC 2.0. Handshake revisions `2025-11-25`, `2025-06-18`,
+  `2025-03-26` and `2024-11-05`; the handshake-free revision `2026-07-28`, where each request
+  names its revision and results carry `resultType: "complete"`; `server/discover`; batches.
+  Errors: `-32700` parse, `-32601` unknown method, `-32602` unknown tool or bad arguments, `-32022`
+  unsupported revision.
+- **Child mode.** `hufu mcp --child-of <job>` serves exactly one tool, `computer_use`, to the
+  executor of that job (section 12).
+- A panic inside one tool is answered as a tool error; the server and the host's session go on.
 
-## 12. Testing
+## 12. Capability routing: computer use
 
-| Layer | What | How |
-|---|---|---|
-| Unit | Spec validation, capability checks, tier and effort mapping, store atomicity | `cargo test`, no processes |
-| Fake agents | Runner and adapters against scripted agents | A fake ACP agent and fake CLI binaries in the `hufu-testing` crate that replay recorded transcripts, including the bad cases: exit 0 with no output, soft-denied actions, a hang, a crash mid-stream, malformed JSON |
-| Conformance | Every adapter passes one shared suite | Same assertions for all adapters: explicit tier flags, refusal of unsupported tiers and effort levels, cancel within the grace period, timeout enforcement, final message present |
-| Durability | Jobs outlive callers; lost jobs are detected | Kill the caller; kill the runner; check the store |
-| Live smoke | Real agents | Opt-in (`HUFU_LIVE=1`), run on a machine where the agents are installed and logged in. Never in default CI |
-
-Recorded transcripts are tagged with the agent version they came from. When `hufu doctor` sees a
-version newer than any recorded one, it says so.
-
-## 13. Versioning
-
-- The task spec, configuration and every JSON output carry `version` or `v`.
-- The CLI follows semantic versioning from 1.0. Before that, breaking changes are listed in the
-  changelog.
-- Adapters record the range of agent versions they were tested against.
-
-## 14. Capability routing (planned)
-
-Some work needs more than code tools. The first such capability is **computer use**: operating a
-desktop, a browser or another application through its interface. It can be served by a separately
-configured agent or by the executor's own agent
+Some work needs more than code tools. **Computer use** means operating a desktop application
+through its interface. It can be served by a separately configured agent or by the job's own agent
 ([requirements, section 7.9](../requirements/requirements.md#79-capability-routing),
 [ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md)). The design borrows from LCU
-([study](../research/computer-use.md)). This section sketches the formats; details are settled in
-milestone M5.
+([study](../research/computer-use.md)).
 
-### 14.1 Configuration
+### 12.1 Configuration
 
 ```yaml
 profiles:
-  operator:
-    description: Agent used for desktop and browser operation
-    adapter: acp
-    command: [some-agent, acp]
+  claude:
+    adapter: claude-cli
     provides:
-      computer_use: { via: lcu }    # via: native | lcu | other runtime name
-
-  codex-high:
-    adapter: codex-cli              # provides no computer use of its own
+      computer_use: {via: native}   # this executor can operate the desktop itself
+  desk:
+    adapter: codex-cli
+    provides:
+      computer_use: {via: lcu}      # a profile kept for desktop operation, through LCU
+  codex:
+    adapter: codex-cli              # provides no computer use
 
 capabilities:
   computer_use:
     route: dedicated                # dedicated | executor
-    agent: operator                 # used when route is dedicated
+    agent: desk                     # any profile that declares the capability
     when_unavailable: error         # error | executor
     max_concurrent: 1               # one operator per display
 ```
 
 | `route` | Meaning |
 |---|---|
-| `executor` | The executor's own agent operates the desktop. Valid only for profiles that declare `provides.computer_use`; otherwise the task is rejected |
-| `dedicated` | Computer-use steps are carried out by the profile named in `agent`, whichever agent is executing the task |
+| `executor` | The job's own agent operates the desktop. Valid only for profiles that declare `provides.computer_use`; otherwise the task is refused |
+| `dedicated` | Computer-use steps are carried out by the profile named in `agent`, whichever agent is executing the task. That profile can be one of the executors or a profile used for nothing else; either way it must declare the capability |
 
-A task may override the route in its own spec. Hufu does not install or configure the runtime
-itself. `via` only tells Hufu how to check readiness, for example by reading `lcu apps`.
+A task may override the route and the agent (`computer_use: {route, agent}`, or
+`--computer-use-route`, `--computer-use-agent`). When the dedicated agent is the job's own profile,
+the route collapses to `executor`. Hufu does not install or configure the runtime; `via` only
+tells Hufu how to check readiness.
 
-### 14.2 Granting
+### 12.2 Granting
 
 ```yaml
 grants:
   - capability: computer_use
-    apps: ["Figma", "Safari"]       # the app scope
+    apps: ["Figma", "Notes"]        # the app scope
 ```
 
 - Without the grant, no route is set up and the executor is not offered the tool, whatever its
   permission tier.
-- The app scope is required. Terminal applications and the application hosting the agent are
-  always refused. Browsers and password managers must be named explicitly; no wildcard covers them.
-- In a mission, the advisor may request a grant only if the mission's `allowed_grants` includes it,
-  and only for apps the mission lists.
+- The app scope is required and has no wildcards. Terminal applications and agent host
+  applications are always refused. Browsers and password managers are allowed only by name and
+  come with a warning in the result.
+- In a mission, the advisor may request a grant only if `allowed_grants` includes the capability,
+  and only for applications listed there.
+- A grant does not carry over to a follow-up job.
 
-### 14.3 Pre-flight
+### 12.3 Pre-flight
 
-Before launch, Hufu checks what it can without touching the screen:
+Before launch, without touching the screen:
 
-1. The serving profile declares the capability and its runtime is present (`hufu doctor` reports
-   this per profile).
-2. Every app in the scope is already allowed in the runtime, where the runtime can list that. If
-   one is missing, the task is rejected with the command the user must run. Hufu never runs that
-   command, and never answers a runtime's approval prompt.
+1. The serving profile declares the capability. For `via: lcu` on a platform LCU does not support,
+   the task is refused.
+2. Where the runtime can list what it already allows (`lcu apps` for LCU, or the profile's
+   `check` command), every application in the scope must be in that list. If one is missing, the
+   task is refused with the command a person must run. Hufu never runs it, and never answers a
+   runtime's approval prompt. Where the runtime cannot be asked, the job carries a warning instead.
 3. The display slot is free, or the job queues for it.
 
-### 14.4 How a dedicated route works
+`hufu doctor` reports the same per profile.
 
-1. For a task with the grant, Hufu attaches a small MCP server to the executor's session. Over ACP
-   this uses the `mcpServers` parameter of `session/new`; CLI adapters use the agent's own MCP
-   configuration where it has one. An executor that can take neither cannot use a dedicated route,
-   and the task is rejected at validation.
-2. The server offers one tool, `computer_use`, taking an instruction and optional limits.
+### 12.4 How a dedicated route works
+
+1. For a task with the grant, the runner attaches a small MCP server to the executor's session:
+   `hufu mcp --child-of <job>`. Over ACP this uses the `mcpServers` parameter of `session/new`;
+   Codex and Claude Code take it through their own MCP configuration flags. An executor whose
+   adapter cannot attach an MCP server cannot use the dedicated route, and the task is refused at
+   validation.
+2. The server offers one tool, `computer_use`, taking an instruction.
 3. A call creates a **child job** on the dedicated profile, linked to the parent, carrying the
-   parent's grant and app scope, and waits for it within the parent's remaining time.
-4. The child's final message is returned as the tool result. Screenshots and the action log stay in
-   the child job's directory and are referenced, not inlined.
-5. Child jobs count against the parent's budgets and against the display slot.
+   parent's app scope, and waits for it within the parent's remaining time.
+4. The child's final message is returned as the tool result. Its events and raw output stay in the
+   child job's directory.
+5. Child jobs do not take a slot of the global limit, since they are part of their parent, but the
+   child holds the display slot while it runs. Cancelling the parent cancels its children.
 
-### 14.5 Stop and safety
+### 12.5 Safety
 
-- Cancelling a computer-use job first asks the runtime to stop, so that held keys and buttons are
-  released, and only then terminates the process group.
-- Computer use is scoped to one job. It does not carry over to a follow-up job without a new grant.
+- Computer use is scoped to one job and to the listed applications.
 - Computer use acts outside the workspace. Worktree isolation and permission tiers do not contain
   it, and a grant should be read as wider than `full-access`.
 - The recommended setup is a separate machine, VM or user account for the operating agent.
+
+## 13. Testing
+
+| Layer | What | How |
+|---|---|---|
+| Unit | Parsers for each agent's output, tier and effort mapping, configuration validation and merging, schema validation, routing, time and process helpers | `cargo test`, in each crate |
+| Fake agents | One fake per adapter flavour, compiled into the `hufu` binary and started as `hufu __fake-agent <flavor>` | They print what the real agent's documentation says it prints, and take directives in the prompt (`[[fake:slow=1500]]`, `[[fake:deny]]`, `[[fake:hang]]`, `[[fake:auth]]`, `[[fake:malformed]]`, ...) to produce the bad cases: exit 0 with no output, soft-denied actions, a hang, a crash mid-stream, malformed JSON, a login error, a rate limit |
+| Conformance | Every adapter passes one shared suite, C1 to C12 | Explicit tier flags, refusal of unsupported tiers and effort levels, cancel within the grace period, a final message or a failure, never an empty success |
+| End to end | The built binary, in a throwaway home, against the fakes | `src/crates/hufu-cli/tests/e2e/`: jobs, missions, MCP (with a client of its own), computer use, the daemon, configuration and setup. Includes durability: kill the caller, kill the runner, kill the daemon, and check the store |
+| Documentation | The files under `doc/examples/` | Loaded and used by an end-to-end test |
+| Self-test | `hufu doctor --self-test` | A user-facing subset of the same idea: three real jobs against the fakes |
+| Platforms | Linux, macOS, Windows | The whole suite runs on all three in CI |
+| Live | Real agents | Not automated: it needs logins. Open item in the [roadmap](../roadmap.md#next) |
+
+Because the fakes live in the shipped binary, the end-to-end tests exercise the same executable a
+user installs, and need nothing else on the machine but `git`.
+
+## 14. Daemon
+
+The daemon is optional and stateless: everything it knows is in the job store.
+
+- **Presence.** `run/daemon.json` holds its pid and a heartbeat refreshed every few seconds. A
+  daemon counts as running only if the process is alive **and** the heartbeat is fresh, which also
+  covers a daemon that died without cleaning up.
+- **Queue.** While a daemon is running, `hufu run` records the job as queued for the daemon instead
+  of starting a runner. The daemon starts runners oldest first while there is room. If the daemon
+  disappears, any `status` or `wait` on such a job starts its runner directly.
+- **Lost jobs.** A job that became `lost` with `runner_died` after the daemon started, and whose
+  retry policy has attempts left, is put back in the queue.
+- **Pruning** runs once an hour according to `retention`.
+- **Stopping** uses a marker file, so it works the same on every platform; running jobs are not
+  touched.
+
+## 15. Setup and health
+
+- **`hufu init`** looks for each preset's program on `PATH`, writes a commented `config.yaml`
+  naming what it found, and picks default roles: the advisor is the first agent found, looking in
+  the order `codex`, `claude`, `agy`, `cursor`, `kimi`, `pi`, and the executors are all the agents
+  found.
+- **`hufu setup`** registers the MCP server with host agents (table in the
+  [deployment guide](../deployment/deployment.md#5-connect-host-agents)). JSON and TOML files of
+  other tools are edited in place under a marker or a single key, with a one-time backup; for
+  Claude Code the host's own `claude mcp add` is used, because its settings file is not a stable
+  interface.
+- **`hufu up`** is `init`, `setup`, `daemon start` and `doctor` in one, and safe to repeat.
+- **`hufu doctor`** probes each profile (installed, version, login where it can be seen without
+  running a model), lists configuration problems, and prints next steps. `--self-test` runs three
+  jobs against the fakes in a temporary home: a background job, an ACP job with a permission
+  decision, and a cancel that must leave no process behind.
+
+## 16. Versioning
+
+- The configuration, the task spec and every JSON output carry `version` or `v`, currently `1`.
+- The CLI follows semantic versioning from 1.0. Before that, breaking changes are listed in the
+  release notes.
+- The agent version an adapter saw is recorded in each job's state and result, so a report about a
+  misbehaving agent always says which version it was.

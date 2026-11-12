@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Research snapshot |
-| **Verified on** | 2026-11-12 |
+| **Status** | Research snapshot. Refreshed when the adapters were written (Hufu 0.1); the flags each adapter passes are in the [adapter contract](../technical/adapter-contract.md) |
+| **Verified on** | 2026-11-12, against vendor documentation. No agent was run with a real account |
 | **Feeds into** | [Requirements](../requirements/requirements.md), [Adapter contract](../technical/adapter-contract.md), [ADR-0002](../adr/0002-acp-first-cli-fallback.md) |
 
 Hufu drives other coding agents as subprocesses. This document records what each target agent
@@ -57,7 +57,7 @@ All facts in this section are ✅ from `agentclientprotocol.com` (protocol v1 pa
 | Language | Package | Note |
 |---|---|---|
 | TypeScript | `@agentclientprotocol/sdk` (npm, 2.6.0, Apache-2.0) | Reference implementation; Gemini CLI's ACP code is built on it |
-| Rust | `agent-client-protocol` (crates.io, 5.2.0) | The SDK Hufu uses ([ADR-0007](../adr/0007-implement-in-rust.md)) |
+| Rust | `agent-client-protocol` (crates.io, 5.2.0) | Not used: Hufu has a small client of its own for the subset it needs ([ADR-0009](../adr/0009-synchronous-core-and-own-protocol-clients.md)) |
 | Python | `agent-client-protocol` (PyPI) | |
 | Kotlin, Java | Library pages exist | Package names not checked |
 | Go | ❓ | No official page found |
@@ -77,12 +77,12 @@ several, alongside workspace isolation (see [Architecture, section 8](../archite
 
 | Agent | Headless CLI | ACP | Model selection | Reasoning control | Permission default when headless |
 |---|---|---|---|---|---|
-| **Codex** (OpenAI) | `codex exec` ◐ | Via `codex-acp` adapter ✅ | `-m/--model` ◐ | `model_reasoning_effort` config key ◐ | Read-only sandbox ◐ |
+| **Codex** (OpenAI) | `codex exec` ✅ | Via `codex-acp` adapter ✅ | `-m/--model` ◐ | `-c model_reasoning_effort="<level>"` ◐ | Read-only sandbox ◐ |
 | **Cursor** | `agent -p` ✅ | `agent acp`, a hidden command ✅ | `--model` ✅ | ❓ none found | Edits inside the workspace are applied; other actions rejected ✅ |
-| **Antigravity** (Google) | `agy -p` ✅ | ❓ no `agy acp`; a registry entry exists but points at IDE docs | `--model <slug>` ✅ | `--effort low\|medium\|high` ✅ | Ask-only actions are soft-denied and the run still exits `0` ✅ |
-| **Kimi Code** (Moonshot) | `kimi --print` ✅ | `kimi acp` ✅ | `-m/--model` ✅ | `--thinking` / `--no-thinking` (boolean) ✅ | Auto-approves everything (`--print` implies `--afk`) ✅ |
+| **Antigravity** (Google) | `agy -p` ✅ | ❓ no `agy acp`; a registry entry exists but points at IDE docs | `--model <slug>` ✅ | `--effort low\|medium\|high` ✅ (the reference also lists `max` ◐) | Ask-only actions are soft-denied and the run still exits `0` ✅ |
+| **Kimi Code** (Moonshot) | `kimi -p` ✅ | `kimi acp` ✅ | `-m/--model` ✅ | Environment variable `KIMI_MODEL_THINKING_EFFORT=low…max` ✅; cannot be switched off | Runs every tool without asking; only deny rules apply ✅ |
 | **pi** | `pi -p`, `--mode json`, `--mode rpc`, SDK ✅ | Via `pi-acp` adapter ✅ | `--provider`, `--model provider/id` ✅ | `--thinking off…max` ✅ | No permission system at all ✅ |
-| **Claude Code** (Anthropic) | `claude -p` ⚠️ not re-verified in this pass | Via `claude-agent-acp` adapter ✅ | `--model` ⚠️ | ⚠️ | ⚠️ |
+| **Claude Code** (Anthropic) | `claude -p` ✅ | Via `claude-agent-acp` adapter ✅ | `--model` ✅ | `--effort low…max` ✅ | Calls that need approval are denied ✅ |
 | **Gemini CLI**, **OpenCode**, **Goose**, **Qwen Code** | Not checked | Listed as ACP agents ✅ | Through ACP config options | Through ACP config options | Through ACP permission requests |
 | **DeepSeek Harness** (`dsh`) | ❓ | Reported to run an ACP server ⚠️ | ❓ | ❓ | ❓ |
 | **ZCode** (Z.ai) | ❓ no CLI documented | ❓ | In-app only | ❓ | ❓ |
@@ -90,9 +90,10 @@ several, alongside workspace isolation (see [Architecture, section 8](../archite
 ### 3.2 Codex CLI
 
 Source: `learn.chatgpt.com/docs/non-interactive-mode`, `…/developer-commands`, `…/config-reference`
-(the former `developers.openai.com/codex/*` pages redirect here). Evidence ◐: the pages were long
-and partly summarised by the fetcher, and two of them disagreed on details. Confirm with
-`codex exec --help` when the adapter is written.
+(the former `developers.openai.com/codex/*` pages redirect here), and the option list in the
+`codex exec` source. Evidence: ✅ for the options of `exec` itself and for the event stream, ◐ for
+the options shared with the interactive command (`-m`, `--sandbox`, `-C`, `-c`), which were read in
+documentation only.
 
 - `codex exec "<prompt>"`; `codex exec -` reads the prompt from stdin.
 - Progress goes to stderr and only the final agent message goes to stdout. With `--json`, stdout
@@ -102,11 +103,21 @@ and partly summarised by the fetcher, and two of them disagreed on details. Conf
   `-o/--output-last-message <file>` also writes the final message to a file.
 - `--sandbox read-only | workspace-write | danger-full-access`. **`codex exec` defaults to
   read-only**, so an executor that should change files must be given `workspace-write` explicitly.
-- `--ask-for-approval on-request | never`. `--dangerously-bypass-approvals-and-sandbox` (alias
-  `--yolo`) removes both. `--full-auto` is reported as no longer supported.
-- `--model/-m`; reasoning effort through the `model_reasoning_effort` config key. Values listed:
-  `low`, `medium`, `high`, `xhigh`, `max`, `ultra`.
-- `codex exec resume <SESSION_ID>` and `codex exec resume --last`.
+- `--dangerously-bypass-approvals-and-sandbox` (alias `--yolo`) removes the sandbox and all
+  approvals. `--full-auto` is reported as no longer supported. `--ask-for-approval` is documented
+  for the interactive command; we could not confirm that `codex exec` accepts it, so the adapter
+  does not pass it.
+- `--model/-m`; reasoning effort through `-c model_reasoning_effort="<level>"`. The value is parsed
+  as TOML, so a string needs its quotes. Values listed: `low`, `medium`, `high`, `xhigh`, `max`,
+  `ultra`; which of them a model accepts depends on the model.
+- `codex exec resume <SESSION_ID>` and `codex exec resume --last`. Options that are not global
+  (`--sandbox`, `--cd`, `-c`, `--add-dir`) must come before the word `resume`.
+- Event items seen in the stream: `agent_message`, `reasoning`, `command_execution` (with a status
+  that can be `declined`), `file_change`, `mcp_tool_call`, `web_search`, `todo_list`, `error`.
+  `turn.completed` carries token usage.
+- MCP servers are declared in `config.toml` under `[mcp_servers.<name>]`; the same keys can be given
+  per run with `-c`. The configuration directory is `CODEX_HOME`, default `~/.codex`.
+- Exit codes are not documented ❓. The adapter decides success from the event stream.
 - `--cd/-C` sets the workspace root. `--skip-git-repo-check` lifts the "must be a Git repo" rule.
 - Auth: reuses the saved CLI login; `CODEX_API_KEY` can be set per run.
 - `codex app-server` exists and is marked experimental. `codex mcp` manages MCP servers that Codex
@@ -147,7 +158,15 @@ developer forum ⚠️.
 - Permissions: `--dangerously-skip-permissions` approves everything. Otherwise, actions that would
   need a prompt are **soft-denied, and the run still exits `0`** with a notice on stderr.
   Fine-grained allow rules live in settings (`permissions.allow`, for example `command(git)` or
-  `write_file(src/)`). `--sandbox` exists.
+  `write_file(src/)`). `--sandbox` exists. The reference lists `--mode accept-edits | auto | plan`,
+  but not on the headless page ◐; the adapter uses `--mode plan --sandbox` for read-only jobs and
+  backs it with Hufu's own before-and-after comparison of the workspace.
+- `stream-json` prints one object per line with an `event` of `init`, `step_update` or `result`;
+  the last one carries the same envelope as `--output-format json`.
+- MCP servers are read from `~/.gemini/config/mcp_config.json`, or `.agents/mcp_config.json` in the
+  workspace. There is no flag to attach one for a single run, and no flag or environment variable
+  that moves the configuration directory, so a second `agy` account needs a second operating-system
+  user or home directory.
 - `--print-timeout` defaults to `0s`, meaning no limit.
 - Auth: headless runs reuse cached credentials from an earlier interactive login. Without them, the
   run exits with an "authentication required" error instead of hanging.
@@ -170,16 +189,31 @@ before recommending unattended use on subscription accounts.
 
 ### 3.5 Kimi Code CLI
 
-Source: `moonshotai.github.io/kimi-cli` reference pages. Evidence ✅.
+Source: the Kimi Code CLI documentation at `code.kimi.com`, and the reference pages of its
+predecessor at `moonshotai.github.io/kimi-cli`. Evidence ✅ unless marked.
 
-- `--print` is the non-interactive mode and **implicitly enables `--afk`**, which auto-approves all
-  tool calls and auto-dismisses questions. In print mode there is no way to run with tighter
-  permissions.
-- `-p/--prompt`, `--output-format text | stream-json`, `--final-message-only`, `--quiet`.
-- `-m/--model`, `--thinking` / `--no-thinking`.
-- `--continue`, `--session [ID]`, `-w/--work-dir`, `--add-dir`.
-- `kimi acp` starts a multi-session ACP server. Not logged in returns `AUTH_REQUIRED` (`-32000`).
-- Auth: `kimi login` (browser OAuth). An API-key environment variable was not found.
+The first pass of this research read the predecessor, `kimi-cli`, which is now archived. Its
+successor keeps the binary name `kimi` and changes several flags. The points below describe the
+successor (npm package `@moonshot-ai/kimi-code`, Node.js ≥ 22.19, data in `~/.kimi-code` or
+`KIMI_CODE_HOME`).
+
+- `kimi -p "<prompt>"` is the non-interactive mode. It cannot be combined with `--yolo`, `--auto`
+  or `--plan`: print mode **always runs tools without asking**, and only deny rules still apply.
+  There is no read-only print mode.
+- `--output-format text | stream-json`. The stream holds assistant messages, with their tool calls,
+  and tool results, one per line. It has no final "result" line, no usage and no session id ◐, so a
+  print-mode job cannot be resumed by Hufu.
+- `-m/--model`. There is no thinking flag; the level comes from the environment variable
+  `KIMI_MODEL_THINKING_EFFORT=low | medium | high | xhigh | max`, and thinking cannot be turned
+  off. There is no working-directory flag; the process's directory is used.
+- `kimi acp` starts an ACP server over stdio. Not logged in returns `AUTH_REQUIRED` (`-32000`). It
+  supports `session/set_mode`, a `model` config option, `session/load` and `session/resume`.
+- MCP servers are read from `mcp.json` in the data directory, or `.kimi-code/mcp.json` in the
+  project. Headless runs ignore the project file unless `KIMI_CODE_TRUST_WORKSPACE=1`.
+- Auth: `kimi login` (device code). Provider keys are read from `config.toml`, not from the shell
+  environment.
+- Exit codes of print mode are not documented ❓ (the predecessor used `0`, `1` and `75` for
+  "retry later").
 
 ### 3.6 pi
 
@@ -194,10 +228,18 @@ re-checked against the installed release.
 - `--provider <name>`, `--model <provider/id[:thinking]>`,
   `--thinking off | minimal | low | medium | high | xhigh | max`.
 - Providers listed include Anthropic, OpenAI, Google Gemini, **OpenRouter**, **DeepSeek**,
-  **ZAI Coding Plan**, and **Kimi For Coding**. Exact environment-variable names for each
-  provider's key were not on the page read.
-- By design it has no permission prompts, no sub-agents, no plan mode and no MCP. The README's
-  advice is to run it in a container.
+  **ZAI Coding Plan**, and **Kimi For Coding**.
+- By design it has no permission prompts, no sub-agents and no plan mode. The README's advice is
+  to run it in a container. What a run may do is limited by its tool list instead:
+  `--tools read,bash,edit,write` is the default, and `--tools read --no-mcp` leaves an agent that
+  can only read. That is how the adapter offers a read-only tier; there is nothing between
+  read-only and everything.
+- `--mode json` starts with a `session` line that carries the session id and ends with `agent_end`;
+  messages carry usage with a cost. `pi auth check --provider <name> --json` reports whether a
+  provider is ready.
+- Provider keys come from the environment: `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `ZAI_API_KEY`,
+  `KIMI_API_KEY`, `MOONSHOT_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and
+  others. The configuration directory is `PI_CODING_AGENT_DIR`.
 - ACP is available through the community `pi-acp` adapter.
 
 **Why pi matters to Hufu.** OpenRouter and similar APIs are model endpoints, not agents: they have
@@ -205,7 +247,27 @@ no loop that reads files or runs commands. pi is a small, scriptable harness tha
 slug on some provider" into an agent. One pi adapter therefore covers "any model on OpenRouter",
 DeepSeek's API, Z.ai's coding plan and Kimi's coding plan.
 
-### 3.7 ZCode and DeepSeek Harness
+### 3.7 Claude Code
+
+Source: the Claude Code CLI reference and headless documentation at `code.claude.com/docs`.
+Evidence ✅.
+
+- `claude -p` is the non-interactive mode; the prompt can be piped on stdin.
+  `--output-format text | json | stream-json`; `stream-json` needs `--verbose`.
+- `--permission-mode default | acceptEdits | plan | auto | dontAsk | bypassPermissions`, and
+  `--dangerously-skip-permissions`. Since version 2.1.302 a print-mode run with no mode denies
+  every call that would need approval. `plan` gives a read-only run and `acceptEdits` one that may
+  edit files; shell commands outside the allow rules are still denied in `acceptEdits`.
+- `--model`, `--effort low | medium | high | xhigh | max`, `--resume <id>`, `--json-schema`,
+  `--mcp-config <file or JSON>`, `--add-dir`. There is no working-directory flag.
+- The final `result` message carries `session_id`, `total_cost_usd`, `usage`, `structured_output`
+  and `permission_denials`, so denied actions can be read without guessing from text.
+- Not logged in prints "Not logged in" as the result. `claude auth status` exits `0` or `1`. The
+  configuration directory is `CLAUDE_CONFIG_DIR`.
+- As a host: `claude mcp add [--scope local|project|user] <name> -- <command>` registers an MCP
+  server, and skills live in `~/.claude/skills/<name>/SKILL.md`.
+
+### 3.8 ZCode and DeepSeek Harness
 
 - **ZCode** ❓. `zcode.z.ai` describes an Electron desktop development environment (version 3.17.2
   at the time of reading). We found no documented command-line or headless entry point, and no ACP
@@ -224,10 +286,12 @@ several points that affect design:
 | Earlier statement | What the sources say | Consequence |
 |---|---|---|
 | Cursor without `--force` only proposes edits | Print mode applies edits inside the workspace without `--force` | Cursor's safest write-free mode is `--mode plan`, not the default |
-| `agy` takes `--mode accept-edits\|plan` or `--approve` | The official headless page documents only `--dangerously-skip-permissions`, settings-based allow rules and `--sandbox` | A middle permission tier on `agy` needs settings rules; verify on a real install |
+| `agy` takes `--mode accept-edits\|plan` or `--approve` | The headless page documents only `--dangerously-skip-permissions`, settings-based allow rules and `--sandbox`. The reference lists `--mode accept-edits\|auto\|plan` without saying that it applies to `-p`; `--approve` was not found | The adapter uses `--mode plan --sandbox` for read-only and `--sandbox` for workspace writes, and Hufu checks the workspace afterwards. Verify on a real install |
 | `agy` headless times out after 5 minutes by default | `--print-timeout` defaults to `0s` (no limit) | Hufu must enforce its own timeout on every job |
 | Antigravity has an ACP entry | No `agy acp` command; registry entry points at IDE documentation | `agy` is CLI-adapter only for now |
-| Kimi `--print` turns on yolo | It turns on `--afk`, a stronger auto-approve that also dismisses questions | Same practical effect; tighter tiers require the ACP path |
+| Kimi `--print` turns on yolo | Print mode runs every tool without asking and cannot be combined with `--plan` | Same practical effect; tighter tiers require the ACP path |
+| Kimi takes `--thinking`, `--print` and `-w` | Those belong to the archived `kimi-cli`. Kimi Code uses `-p`, the process's directory and `KIMI_MODEL_THINKING_EFFORT` | The adapter targets Kimi Code |
+| pi has no MCP and no way to limit a run | It has `--tools` and `--no-mcp` | pi gets a read-only tier |
 | ZCode has `zcode --prompt` and `--mode build\|plan` | Not found in vendor documentation | ZCode is out of scope until a headless entry is confirmed |
 | DeepSeek Harness has a headless mode | Not confirmed | Candidate for the generic ACP adapter only |
 
@@ -240,7 +304,8 @@ several points that affect design:
    can exit `0` with empty output. Adapters must inspect the event stream, and a job needs an
    acceptance step that is separate from process success.
 3. **Hufu owns timeouts and cancellation.** At least one agent has no default timeout.
-4. **Reasoning controls are not uniform.** They range from six named levels to a boolean to nothing.
+4. **Reasoning controls are not uniform.** They range from seven named levels, through a
+   configuration key and an environment variable, to nothing.
    A task spec uses an abstract level and each adapter declares what it can map.
 5. **Prefer the surface that gives more control.** For Kimi, ACP is the only path with permission
    control. For Codex, the CLI is better documented than its adapter. The preferred surface is a
@@ -251,16 +316,25 @@ several points that affect design:
 
 ## 6. Open verification items
 
-These need a machine with the real CLIs installed and logged in:
+The adapters were written from the documentation above and are tested against fake agents that
+print what the documentation says. The items below need a machine with the real CLIs installed and
+logged in. `hufu doctor` reports the installed version of each agent; record it here when an item
+is closed.
 
-- [ ] `codex exec --help`: confirm sandbox, approval and reasoning-effort flags and values.
-- [ ] `agy --help`: confirm whether a non-interactive middle permission mode exists; confirm the
-      state of the non-TTY stdout bug on the current version.
+- [ ] Every adapter: one read-only job, one writing job, one cancel and one resume against the real
+      agent (the first item of [what is next](../roadmap.md#next)).
+- [ ] `codex exec --help`: confirm the sandbox and reasoning-effort options and their values, and
+      that options before `resume` are accepted as documented.
+- [ ] `agy --help`: confirm that `--mode plan` and `--sandbox` apply to `-p`; confirm the state of
+      the non-TTY stdout bug on the current version; record the text of the soft-denial notice.
 - [ ] Cursor: confirm whether any reasoning-effort control exists (for example model-id suffixes).
-- [ ] `kimi acp`: confirm that permission requests are sent to the client and honoured.
-- [ ] pi: record provider environment-variable names from `docs/providers.md`.
+- [ ] `kimi acp` and `agent acp`: confirm that permission requests are sent to the client and
+      honoured. Until then Hufu offers these profiles `full-access` only, unless the profile is
+      marked `permission_requests: verified`.
+- [ ] Kimi Code print mode: record the exact keys of the stream and the exit codes.
 - [ ] `dsh`: confirm publisher, headless mode and ACP server.
-- [ ] Claude Code: re-verify `claude -p` flags when its adapter is written.
+
+Closed in this pass: Claude Code's flags, pi's provider environment variables.
 
 ## Sources
 
@@ -269,7 +343,8 @@ These need a machine with the real CLIs installed and logged in:
 - Codex: <https://learn.chatgpt.com/docs/non-interactive-mode>, <https://learn.chatgpt.com/docs/developer-commands?surface=cli>, <https://learn.chatgpt.com/docs/config-file/config-reference>
 - Cursor: <https://cursor.com/docs/cli/headless>, <https://cursor.com/docs/cli/reference/parameters>, <https://cursor.com/docs/cli/acp>, <https://cursor.com/docs/cli/reference/output-format>
 - Antigravity: <https://antigravity.google/docs/cli/headless>, <https://github.com/google-antigravity/antigravity-cli/issues/76>, <https://discuss.ai.google.dev/t/183051>, <https://discuss.ai.google.dev/t/179013>
-- Kimi Code: <https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html>, <https://moonshotai.github.io/kimi-cli/en/reference/kimi-acp.html>
+- Kimi Code: <https://code.kimi.com>, and for the predecessor <https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.html>, <https://moonshotai.github.io/kimi-cli/en/reference/kimi-acp.html>
+- Claude Code: <https://code.claude.com/docs/en/cli-reference>, <https://code.claude.com/docs/en/headless>
 - pi: <https://www.npmjs.com/package/@earendil-works/pi-coding-agent>
 - ZCode: <https://zcode.z.ai>
 - Zed external agents: <https://zed.dev/docs/ai/external-agents>

@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review |
-| **Last updated** | 2026-11-12 (Rust, both first adapters, capability routing) |
+| **Status** | Implemented in Hufu 0.1. How far each milestone has been verified is recorded in the [roadmap](../roadmap.md) |
+| **Last updated** | 2026-11-12 (many executors and accounts, one advisor, computer use assigned to any capable executor, one-command setup, configuration over MCP, three platforms) |
 | **Related** | [Research](../research/agent-landscape.md), [Architecture](../architecture/architecture.md), [Roadmap](../roadmap.md) |
 
 ## 1. Background
@@ -46,13 +46,15 @@ against the spec.
 | G4 | Permissions and reasoning effort are explicit in every run and never left to an agent's default |
 | G5 | Adding an ACP-compliant agent is a configuration change, not a code change |
 | G6 | Models on open APIs (OpenRouter, DeepSeek, Z.ai, Kimi) can be executors or advisors |
+| G7 | Executors are plural: any number of agents and APIs, including several accounts of the same agent. The advisor is normally one |
+| G8 | Setting up is one command, and any connected agent can configure Hufu for the user |
+| G9 | Linux, macOS and Windows are equal targets |
 
 ### Non-goals
 
 - **Not an agent.** Hufu has no model loop, no prompt engineering of its own and no tools for
   reading or editing code. It dispatches agents that do.
-- **Not an IDE or dashboard.** The interface is a CLI and, later, an MCP server. A UI may come from
-  others.
+- **Not an IDE or dashboard.** The interface is a CLI and an MCP server. A UI may come from others.
 - **Not a credential manager.** Hufu never stores, reads or forwards an agent's login. Each agent
   authenticates the way its vendor intends.
 - **Not a hosted service.** Hufu runs on the user's machine, next to the agents it drives.
@@ -73,8 +75,9 @@ against the spec.
 |---|---|
 | **Agent** | An external coding agent that Hufu can launch, such as Codex or Kimi Code |
 | **Adapter** | The code that knows how to drive one kind of agent. Two families: ACP and headless CLI |
-| **Agent profile** | A named configuration: adapter, model, reasoning effort and default permission tier. For example `codex-high` or `or-deepseek` |
-| **Role** | What a profile does in a given piece of work: **advisor** (plans, dispatches, reviews) or **executor** (does the task). A role belongs to the mission, not to the agent |
+| **Agent profile** | A named configuration: adapter, model, reasoning effort, default permission tier and, where there are several, the account. For example `codex-high`, `codex-work` or `or-deepseek` |
+| **Pool** | A named set of profiles that can stand in for each other, typically several accounts of one agent. A task may name a pool wherever it may name a profile |
+| **Role** | What a profile does in a given piece of work: **advisor** (plans, dispatches, reviews) or **executor** (does the task). A role belongs to the mission, not to the agent. A mission has one advisor and any number of executors |
 | **Task** | A unit of work described by a task spec: prompt, workspace, profile, permission tier, effort, timeout, acceptance criteria |
 | **Job** | One execution of a task by one agent. It has an id, a state, an event log and a result |
 | **Mission** | A goal handed to an advisor, which breaks it into tasks, dispatches them and reviews the results |
@@ -112,16 +115,27 @@ to the configuration naming its launch command, runs `hufu doctor`, and uses it.
 **S7. Unattended run.** A nightly script runs `hufu run --wait --json` with a timeout and uses the
 exit code to decide whether to open a pull request.
 
-**S8. One step on the desktop (planned).** A coding task needs to check a rendered page in a
+**S8. One step on the desktop.** A coding task needs to check a rendered page in a
 browser. The task grants computer use for that browser. Configuration says computer use goes to a
 dedicated operator profile, so when the executor asks for it, Hufu runs the step on the operator as
 a child job and returns the result. With a different configuration, the executor's own agent would
 do the step itself.
 
+**S9. Two accounts, one pool.** The user has a personal and a work Codex subscription. Each gets a
+profile with its own login directory, and a pool `codex-any` over both. Tasks name the pool. When
+the first account hits its rate limit, the job continues on the second without anyone noticing.
+
+**S10. Set up by asking.** On a new machine the user runs the installer with `--up`. Hufu finds
+Codex and Claude Code, writes a configuration, and registers itself with both. Later, inside Codex,
+the user says "add my OpenRouter model to Hufu as an executor"; Codex calls Hufu's configuration
+tools, and `hufu agents` shows the new profile.
+
 ## 7. Functional requirements
 
 Priority: **P0** must have for the milestone named, **P1** should have, **P2** later.
-Milestones are defined in the [roadmap](../roadmap.md).
+Milestones are defined in the [roadmap](../roadmap.md). The project owner asked for every
+requirement to be implemented in the first version, so the milestone column now only says which
+theme a requirement belongs to; all of them are in Hufu 0.1.
 
 ### 7.1 Tasks and jobs
 
@@ -153,13 +167,13 @@ Milestones are defined in the [roadmap](../roadmap.md).
 |---|---|---|---|
 | FR-15 | Headless CLI adapters for Antigravity (`agy`) and Codex | P0 | M1 |
 | FR-16 | A generic ACP adapter that can drive any ACP agent from configuration | P0 | M2 |
-| FR-17 | Verified ACP profiles for Cursor, Kimi Code and pi | P0 | M2 |
+| FR-17 | Ready-made profiles for Cursor and Kimi Code over ACP (`cursor-acp`, `kimi-acp`), next to headless adapters for both. pi has its own adapter (FR-18); `pi-acp` can be added by configuration. Checking these profiles against the real agents is the open item on the [roadmap](../roadmap.md#next) | P0 | M2 |
 | FR-18 | A pi adapter that exposes open-API models (OpenRouter, DeepSeek, Z.ai, Kimi) as profiles | P0 | M2 |
 | FR-19 | A Claude Code adapter, so that Claude Code can be an executor under another advisor | P1 | M2 |
 | FR-20 | Each adapter declares its capabilities: models, effort levels, permission tiers, resume, structured output, usage reporting | P0 | M1 |
 | FR-21 | A task that asks for something the profile cannot do fails validation with a specific message. Nothing is silently ignored or substituted | P0 | M1 |
 | FR-22 | `hufu agents` lists profiles and their capabilities; `hufu doctor` checks that each agent is installed, reports its version and login state where it can be detected | P0 | M1 |
-| FR-23 | Third-party adapters can be loaded without changing Hufu | P2 | M4 |
+| FR-23 | Third-party adapters can be loaded without changing Hufu: an adapter can be any program that speaks a small JSON protocol (`adapter: external`) | P2 | M4 |
 
 ### 7.4 Permissions and reasoning
 
@@ -168,7 +182,7 @@ Milestones are defined in the [roadmap](../roadmap.md).
 | FR-24 | Three permission tiers, `read-only`, `workspace-write`, `full-access`, each translated by the adapter into explicit agent flags or ACP permission answers | P0 | M1 |
 | FR-25 | Every run states its tier explicitly. No run depends on the agent's default | P0 | M1 |
 | FR-26 | `full-access` is never chosen implicitly; it must appear in the task or profile | P0 | M1 |
-| FR-27 | Actions an agent skipped because permission was denied are reported in the result, and by default make the job fail | P0 | M1 |
+| FR-27 | Actions an agent skipped because permission was denied are reported in the result with a warning. A task can ask that any such action fails the job (`strict_permissions`), or make it an acceptance check (`no_denied_actions`). Failing by default was dropped: an agent that tries a command, is refused and still answers correctly is common at the `read-only` tier (see Q3) | P0 | M1 |
 | FR-28 | One effort scale mapped per adapter. An unmappable level is an error unless the profile opts in to nearest-level fallback | P0 | M1 |
 | FR-29 | Model selection per task or profile, validated against what the agent accepts where that can be known | P0 | M1 |
 
@@ -201,9 +215,11 @@ Milestones are defined in the [roadmap](../roadmap.md).
 |---|---|---|---|
 | FR-43 | Every command supports `--json` with a documented, versioned output shape | P0 | M1 |
 | FR-44 | Exit codes are documented and stable | P0 | M1 |
-| FR-45 | An MCP server (`hufu mcp`) exposing submit, status, result, wait and cancel. Submit returns a job id immediately | P1 | M4 |
-| FR-46 | A long-running daemon that owns scheduling and quotas, managed by launchd or systemd | P1 | M4 |
+| FR-45 | An MCP server (`hufu mcp`) exposing submit, status, result, logs, wait, cancel and resume. Submit returns a job id immediately | P1 | M4 |
+| FR-46 | An optional long-running daemon that starts queued jobs in order, restarts lost jobs whose retry policy allows it, and prunes. Limits hold without it. It can run under launchd, systemd or a scheduled task | P1 | M4 |
 | FR-47 | Configuration in a global file and an optional per-project file, with the project overriding the global | P0 | M1 |
+| FR-58 | The MCP server also exposes missions (start, status, pause, resume, abort), the agent list and the health check | P1 | M4 |
+| FR-59 | Hufu can be configured through MCP tools: roles, limits and any other key, profiles, pools, the first configuration and host registration. A change is validated against the whole configuration before it is written; an invalid one changes nothing | P0 | M4 |
 
 ### 7.8 Observability
 
@@ -215,7 +231,7 @@ Milestones are defined in the [roadmap](../roadmap.md).
 
 ### 7.9 Capability routing
 
-Planned for M5. Background in the [computer-use study](../research/computer-use.md) and
+Background in the [computer-use study](../research/computer-use.md) and
 [ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md).
 
 | ID | Requirement | Pri | Milestone |
@@ -227,6 +243,23 @@ Planned for M5. Background in the [computer-use study](../research/computer-use.
 | FR-55 | Hufu never answers or bypasses a computer-use runtime's own approval. Applications not already allowed cause the task to be rejected before launch, with instructions | P0 | M5 |
 | FR-56 | At most one computer-use job runs per display at a time | P0 | M5 |
 | FR-57 | `hufu doctor` reports, per profile, whether a computer-use runtime is present and usable on this machine | P1 | M5 |
+| FR-65 | The agent that performs computer use is chosen in configuration from the configured profiles: it can be any executor profile, or a profile configured only for computer use. In both cases the profile must declare that it supports computer use; one that does not is refused, as the dedicated agent and as an executor on the `executor` route | P0 | M5 |
+
+### 7.10 Executors, accounts and pools
+
+| ID | Requirement | Pri | Milestone |
+|---|---|---|---|
+| FR-60 | Any number of executor profiles can be configured, mixing agents and API-backed models. The same agent can appear several times with different models, efforts or accounts. The default advisor is a single profile and cannot be a pool | P0 | M4 |
+| FR-61 | A profile selects an account without Hufu holding a credential: by the agent's own login directory (`home`), or by the names of environment variables to pass through or rename (`env`, `env_from`). A value that looks like a secret is refused in the configuration | P0 | M4 |
+| FR-62 | Profiles can be grouped into a pool with a strategy: `failover`, `round-robin` or `least-busy`. When the chosen member is not installed, not logged in or rate limited, the job moves to the next member. Other failures do not cause a move | P0 | M4 |
+
+### 7.11 Setup
+
+| ID | Requirement | Pri | Milestone |
+|---|---|---|---|
+| FR-63 | One command (`hufu up`) takes a machine with agents installed to a working setup: it detects the agents, writes a first configuration with default roles, registers Hufu with the agents, starts the daemon and reports what is still missing. Running it again changes nothing that is in place | P0 | M4 |
+| FR-64 | `hufu setup` registers Hufu's MCP server with any supported host (Claude Code, Codex, Cursor, Kimi Code, Antigravity), for the user or for one project, with a preview and a way back, and prints a snippet for any other host. Existing settings of the host are preserved and backed up | P0 | M4 |
+| FR-66 | Install scripts for macOS, Linux and Windows fetch a prebuilt binary, verify its checksum, and can run the setup in the same step | P0 | M4 |
 
 ## 8. Non-functional requirements
 
@@ -238,7 +271,7 @@ Planned for M5. Background in the [computer-use study](../research/computer-use.
 | NFR-04 | Safety | Least privilege by default: the default tier is `read-only`. Write access is always an explicit choice |
 | NFR-05 | Reliability | State changes are atomic on disk. A crash at any point leaves every job in a readable, truthful state |
 | NFR-06 | Reliability | "Exit 0" from an agent is never taken as success on its own |
-| NFR-07 | Portability | macOS and Linux from M1. Windows is a later goal; nothing in the design should rule it out |
+| NFR-07 | Portability | Linux, macOS and Windows, on x86-64 and ARM64. The test suite runs on all three in CI |
 | NFR-08 | Performance | Submitting a job returns in under 200 ms. Hufu's own overhead per running job stays below 20 MB of memory |
 | NFR-09 | Scale | Tens of concurrent jobs and thousands of stored jobs on one machine. Not designed for clusters |
 | NFR-10 | Extensibility | A new CLI adapter is one module of a few hundred lines and passes a shared conformance suite |
@@ -246,6 +279,7 @@ Planned for M5. Background in the [computer-use study](../research/computer-use.
 | NFR-12 | Usability | Every validation error says what was wrong, which profile or field, and what would be accepted |
 | NFR-13 | Licence | Apache-2.0. Dependencies must be compatible with it |
 | NFR-14 | Distribution | A single self-contained binary per platform. Hufu itself needs no language runtime on the user's machine |
+| NFR-15 | Ease of setup | From nothing to a first dispatched job in two commands: install, `hufu up`. Everything that can be configured by editing the file can also be configured by command and through MCP |
 
 ## 9. Constraints and assumptions
 
@@ -263,7 +297,7 @@ Planned for M5. Background in the [computer-use study](../research/computer-use.
 
 | Measure | Target |
 |---|---|
-| Agents reachable through one task spec at the end of M2 | At least six, including one open-API model through pi |
+| Agents reachable through one task spec | At least six, including one open-API model through pi |
 | Jobs that survive the death of their submitting session, in the durability test | 100% |
 | Time for a new user to delegate a first task from Claude Code, with one agent already installed | Under ten minutes |
 | Cases in the conformance suite where an unsupported tier or effort level is silently accepted | Zero |
@@ -273,12 +307,8 @@ Planned for M5. Background in the [computer-use study](../research/computer-use.
 
 | # | Question | Owner | Needed by |
 |---|---|---|---|
-| Q3 | When a permission request falls outside the tier, should Hufu always reject, or may it pause the job and ask the advisor? | Design | M3 |
-| Q4 | Does the advisor review every result, or only those whose automatic checks fail? This trades cost against assurance | Design | M3 |
-| Q5 | Is Windows support wanted before 1.0? | Project owner | M4 |
-| Q6 | How are results delivered to a host that cannot poll, for example through a hook or a notification? | Design | M4 |
-| Q7 | Which adapter surfaces can carry a computer-use runtime headlessly, given that its approvals fail closed? | Research | M5 |
-| Q8 | Is the file-based job store acceptable? Proposed in [ADR-0006](../adr/0006-file-based-job-store.md) | Project owner | Before M1 |
+| Q6 | How are results delivered to a host that cannot poll, for example through a hook or a notification? | Design | Later |
+| Q9 | Do the adapters hold against the real agents? They follow the documentation and are tested against fakes | Maintainers, on a machine with logins | First release |
 
 ### Resolved
 
@@ -286,3 +316,8 @@ Planned for M5. Background in the [computer-use study](../research/computer-use.
 |---|---|---|---|
 | Q1 | Implementation language | **Rust.** The crate is `hufu-cli`, the command is `hufu` ([ADR-0007](../adr/0007-implement-in-rust.md)) | 2026-11-12 |
 | Q2 | Which adapter comes first, `agy` or Codex | **Both ship in the first version** | 2026-11-12 |
+| Q3 | A permission request outside the tier: reject, or pause and ask the advisor? | **Always reject.** The action is recorded as denied and shown in the result; `strict_permissions` turns it into a failure. An unattended job never waits for an answer | 2026-11-12 |
+| Q4 | Does the advisor review every result? | **Configurable**: `review: always`, `on_failure` (default) or `never`. Automatic checks always outrank the advisor's opinion | 2026-11-12 |
+| Q5 | Is Windows support wanted before 1.0? | **Yes.** The project owner asked for all platforms in the first version | 2026-11-12 |
+| Q7 | Which surface carries computer use headlessly? | A hand-over tool served by Hufu over MCP to the executor (`hufu mcp --child-of <job>`), which runs the step as a child job on the operator profile. The runtime's own allow-list is checked before launch and never widened ([ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md)) | 2026-11-12 |
+| Q8 | Is the file-based job store acceptable? | **Built as proposed** ([ADR-0006](../adr/0006-file-based-job-store.md)) | 2026-11-12 |

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed.** The requirement is the project owner's; the design below is for review |
+| **Status** | Accepted. Built as proposed (2026-11-12), with one clarification from the project owner, recorded at the end |
 | **Date** | 2026-11-12 |
 
 ## Context
@@ -63,3 +63,19 @@ What the study showed:
   use is specified now.
 - Scheduled as milestone M5, after the daemon, because the display lock and child jobs are simplest
   with a single owner of scheduling.
+
+## Clarification (2026-11-12)
+
+While the plan was being implemented, the project owner stated the requirement more precisely:
+computer use can be assigned to **any configured executor agent, provided that agent supports
+computer use**, and it can also be configured on its own.
+
+That is what was built, and it needed no change to the decision above:
+
+- `capabilities.computer_use.agent` may name any profile, whether or not it is also an executor.
+- A profile supports computer use only if it says so (`provides.computer_use`). Naming one that
+  does not is a configuration error, and a task routed to one is refused.
+- The `executor` route requires the same declaration of the job's own profile.
+- When the named agent is the job's own profile, no hand-over is set up: the route collapses to
+  `executor`.
+

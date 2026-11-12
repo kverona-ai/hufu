@@ -1,0 +1,111 @@
+name: Release
+
+# Pushing a tag `vX.Y.Z` builds Hufu for every supported platform and publishes a GitHub release.
+# The install scripts in src/install download from the latest published release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  GH_TOKEN: ${{ github.token }}
+  TAG: ${{ github.ref_name }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  draft:
+    name: Draft the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match the version in src/Cargo.toml
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' src/Cargo.toml)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match version $version in src/Cargo.toml"
+            exit 1
+          fi
+      - name: Create the draft
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --title "Hufu $TAG" --generate-notes
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: draft
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux binaries are static (musl) and linked with the linker that ships with Rust,
+          # so one runner builds both architectures and the result runs on any distribution.
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, linker: rust-lld }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, linker: rust-lld }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+      - name: Build
+        working-directory: src
+        run: |
+          if [ -n "${{ matrix.linker }}" ]; then
+            name=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
+            export "CARGO_TARGET_${name}_LINKER=${{ matrix.linker }}"
+          fi
+          cargo build --release --locked -p hufu-cli --target "${{ matrix.target }}"
+      - name: Package
+        run: |
+          target="${{ matrix.target }}"
+          out="src/target/$target/release"
+          stage="hufu-$target"
+          mkdir -p "$stage" dist
+          cp README.md README.zh-CN.md LICENSE "$stage/"
+          case "$target" in
+            *windows*)
+              cp "$out/hufu.exe" "$stage/"
+              asset="hufu-$target.zip"
+              7z a -tzip "dist/$asset" "$stage" >/dev/null
+              ;;
+            *)
+              cp "$out/hufu" "$stage/"
+              asset="hufu-$target.tar.gz"
+              tar -czf "dist/$asset" "$stage"
+              ;;
+          esac
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$asset" > "$asset.sha256"
+          else
+            shasum -a 256 "$asset" > "$asset.sha256"
+          fi
+          cat "$asset.sha256"
+      - name: Upload
+        run: gh release upload "$TAG" dist/* --clobber
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add the install scripts and publish
+        run: |
+          gh release upload "$TAG" src/install/install.sh src/install/install.ps1 --clobber
+          gh release edit "$TAG" --draft=false --latest

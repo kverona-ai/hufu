@@ -1,6 +1,7 @@
 # Sample task spec.
 # Submit with:  hufu run -f task.yaml
-# Format reference: doc/technical/technical-design.md, section 4.
+# Check it first:  hufu run -f task.yaml --dry-run
+# Reference: doc/guide/user-guide.md, "Task files".
 
 version: 1
 title: Share one in-flight token refresh
@@ -14,7 +15,7 @@ prompt: |
   - Add or update unit tests under test/auth.
   - Run the auth unit tests and report the result.
 
-agent: codex-high
+agent: codex-any                 # a profile or a pool
 cwd: .
 permission: workspace-write
 effort: high

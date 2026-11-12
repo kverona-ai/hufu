@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Research snapshot for a planned capability (milestone M5) |
+| **Status** | Research snapshot. The routing it led to is implemented in Hufu 0.1 and tested with a fake operator; nothing here was run against LCU or a real desktop |
 | **Verified on** | 2026-11-12 |
-| **Feeds into** | [Requirements, section 7.9](../requirements/requirements.md#79-capability-routing), [ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md), [Technical design, section 14](../technical/technical-design.md#14-capability-routing-planned) |
+| **Feeds into** | [Requirements, section 7.9](../requirements/requirements.md#79-capability-routing), [ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md), [Technical design, section 14](../technical/technical-design.md#12-capability-routing-computer-use) |
 
 "Computer use" means an agent operating a desktop, a browser or another application through its
 interface: reading the screen, clicking, typing. The project owner wants Hufu to be able to route
@@ -108,8 +108,8 @@ it. ✅
 | Fail closed when nobody can answer | A computer-use task whose apps are not already allowed is rejected before launch, with the command the user needs to run |
 | Never operate the host app or a terminal | Hufu's app scope refuses terminals and the app hosting the agent, and requires browsers and password managers to be named explicitly |
 | Computer use is scoped to a turn | In Hufu it is scoped to one job. It ends when the job ends |
-| Interrupt reaches the runtime, input is released | `hufu cancel` on a computer-use job must reach the runtime's stop before the process is terminated |
-| Results forwarded unchanged | Screenshots and logs stay as files in the job directory and are referenced from the result |
+| Interrupt reaches the runtime, input is released | `hufu cancel` first asks the agent to stop (the protocol's cancel, or a termination signal), waits a grace period, and only then ends the process tree, the runtime included. Cancelling a parent job cancels its computer-use child jobs |
+| Results forwarded unchanged | On the dedicated route the operator's final message is returned to the executor unchanged; its events and raw output stay in the child job's directory |
 | Honest about what is not a boundary | Hufu's documents say plainly that computer use is not contained by permission tiers or worktrees |
 
 ## 4. What LCU does not do, and Hufu adds
@@ -142,7 +142,23 @@ that is doing the coding.
    permitted is governed by OpenAI's terms, which were not reviewed here. Hufu will not bundle or
    install LCU; it only recognises a profile that already has it.
 6. **LCU is young and moving.** Its own documents contradict each other in places. Treat every
-   detail above as something to re-check when the milestone starts.
+   detail above as something to re-check on a real install.
+
+### What Hufu 0.1 built from this
+
+- A profile declares `provides.computer_use` with `via: native` or `via: lcu`; a task or the
+  configuration picks the route, `executor` or `dedicated`, and may name the operating profile.
+- A task needs a grant with a list of applications. Terminals and agent host applications are
+  refused; browsers and password managers must be named.
+- Before launch Hufu asks the runtime what it already allows (`lcu apps`, or the profile's own
+  `check` command) and refuses the task if an application is missing. It never answers an
+  approval prompt.
+- One computer-use job per display at a time.
+
+The mechanics are in the
+[technical design, section 12](../technical/technical-design.md#12-capability-routing-computer-use).
+The first three items of the list below are still open, which is why the
+[roadmap](../roadmap.md#next) lists a run on a real desktop as remaining work.
 
 ## 6. Open verification items
 
