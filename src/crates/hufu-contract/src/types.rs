@@ -191,6 +191,10 @@ pub struct Provided {
     /// `native`, `lcu`, or the name of another runtime.
     #[serde(default = "default_via")]
     pub via: String,
+    /// A command that prints the applications the runtime already allows, one per line. For
+    /// `via: lcu` this defaults to `lcu apps`. Hufu only reads its output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check: Vec<String>,
 }
 
 fn default_via() -> String {
@@ -201,8 +205,8 @@ fn default_via() -> String {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
-    /// Filled in from the map key; not part of the YAML body.
-    #[serde(skip)]
+    /// Filled in from the map key of `profiles`; a `name` written in the body is overwritten.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
