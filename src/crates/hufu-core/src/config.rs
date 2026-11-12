@@ -337,6 +337,18 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// Refuses to work on a configuration that has problems, naming all of them at once.
+    pub fn ensure_valid(&self, adapters: &dyn AdapterRegistry) -> Result<()> {
+        let problems = self.problems(adapters);
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(HufuError::usage(format!("the configuration has {} problem(s); fix them first (`hufu config validate` lists them):\n  {}", problems.len(), problems.join("\n  "))))
+        }
+    }
+}
+
 /// What a name in `agent:` refers to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AgentRef {
@@ -424,6 +436,13 @@ impl Config {
             if self.pools.contains_key(name) {
                 out.push(format!("{at}: a pool has the same name; profile and pool names share one namespace"));
             }
+            for (key, value) in &profile.vars {
+                if looks_secret(key, value) {
+                    out.push(format!(
+                        "{at}.vars.{key}: this looks like a secret, and `vars` is stored in plain text. Keep the value in your shell and name the variable under `env`, or map it with `env_from: {{{key}: YOUR_SHELL_VARIABLE}}`"
+                    ));
+                }
+            }
         }
         for name in self.limits.per_profile.keys() {
             if !self.profiles.contains_key(name) {
@@ -441,7 +460,9 @@ impl Config {
             }
         }
         if let Some(advisor) = &self.roles.advisor {
-            if !self.profiles.contains_key(advisor) {
+            if self.pools.contains_key(advisor) {
+                out.push(format!("roles.advisor: `{advisor}` is a pool; the advisor is one profile, so that a mission keeps one planner from start to end"));
+            } else if !self.profiles.contains_key(advisor) {
                 out.push(format!("roles.advisor: `{advisor}` is not a profile"));
             }
         }
@@ -466,6 +487,14 @@ impl Config {
         }
         out
     }
+}
+
+/// Whether a literal variable is more likely a credential than a setting.
+fn looks_secret(key: &str, value: &str) -> bool {
+    let key = key.to_ascii_uppercase();
+    let named = ["_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_CREDENTIALS"].iter().any(|s| key.ends_with(s));
+    let shaped = ["sk-", "ghp_", "gho_", "xoxb-", "xoxp-", "AKIA"].iter().any(|p| value.starts_with(p)) && value.len() >= 16;
+    !value.is_empty() && (named || shaped)
 }
 
 /// Profiles that exist without any configuration. A configured profile of the same name wins.
@@ -508,8 +537,18 @@ pub fn parse_yaml(text: &str) -> std::result::Result<Value, String> {
     if text.trim().is_empty() || text.lines().all(|l| l.trim().is_empty() || l.trim_start().starts_with('#')) {
         return Ok(json!({}));
     }
-    let v: Value = serde_saphyr::from_str(text).map_err(|e| e.to_string())?;
+    let v: Value = serde_saphyr::from_str_with_options(text, yaml_options()).map_err(|e| e.to_string())?;
     Ok(if v.is_null() { json!({}) } else { v })
+}
+
+/// How Hufu reads YAML: only `true` and `false` are booleans, and numbers written in a way no
+/// one writes a number stay text. A profile called `no` or a model called `0613` is a name.
+fn yaml_options() -> serde_saphyr::Options {
+    serde_saphyr::options! {
+        strict_booleans: true,
+        leading_zero_numbers_as_strings: true,
+        underscored_numbers_as_strings: true,
+    }
 }
 
 /// Serializes a value as YAML.
@@ -605,8 +644,17 @@ const HEADER: &str = "# Hufu configuration. Reference: doc/technical/technical-d
 # This file holds names of environment variables, never their values.\n";
 
 /// Validates and writes a raw configuration document. Nothing is written if it is invalid.
-pub fn write_raw(path: &Path, raw: &Value, adapters: &dyn AdapterRegistry) -> Result<()> {
-    if let Err(problems) = check_raw(raw, adapters) {
+pub fn write_raw(path: &Path, raw: &Value, base: Option<&Value>, adapters: &dyn AdapterRegistry) -> Result<()> {
+    // A project file is judged together with the user-wide file it overlays.
+    let effective = match base {
+        Some(base) => {
+            let mut merged = base.clone();
+            merge(&mut merged, raw.clone(), false);
+            merged
+        }
+        None => raw.clone(),
+    };
+    if let Err(problems) = check_raw(&effective, adapters) {
         return Err(HufuError::usage(format!("the change would make the configuration invalid:\n  {}", problems.join("\n  "))));
     }
     let mut doc = raw.clone();
@@ -676,7 +724,7 @@ pub fn get_path<'a>(value: &'a Value, dotted: &str) -> Option<&'a Value> {
 
 /// Parses a command-line value as YAML, so `4`, `true`, `[a, b]` and `{k: v}` keep their types.
 pub fn parse_scalar(text: &str) -> Value {
-    match serde_saphyr::from_str::<Value>(text) {
+    match serde_saphyr::from_str_with_options::<Value>(text, yaml_options()) {
         Ok(v) if !v.is_null() || text.trim() == "null" || text.trim() == "~" => v,
         _ => Value::String(text.to_string()),
     }
@@ -849,14 +897,14 @@ capabilities:
         set_path(&mut raw, "defaults.timeout", parse_scalar("45m")).unwrap();
         set_path(&mut raw, "limits.max_concurrent_jobs", parse_scalar("8")).unwrap();
         set_path(&mut raw, "profiles.fast", json!({"adapter": "agy-cli", "effort": "low"})).unwrap();
-        write_raw(&path, &raw, &Kinds).unwrap();
+        write_raw(&path, &raw, None, &Kinds).unwrap();
         let back = read_raw(&path).unwrap();
         assert_eq!(get_path(&back, "limits.max_concurrent_jobs"), Some(&json!(8)));
         assert_eq!(get_path(&back, "profiles.fast.effort"), Some(&json!("low")));
         assert!(std::fs::read_to_string(&path).unwrap().starts_with("# Hufu configuration"));
         let mut bad = back.clone();
         set_path(&mut bad, "profiles.fast.adapter", json!("nope")).unwrap();
-        assert!(write_raw(&path, &bad, &Kinds).unwrap_err().message.contains("unknown adapter"));
+        assert!(write_raw(&path, &bad, None, &Kinds).unwrap_err().message.contains("unknown adapter"));
         assert!(remove_path(&mut raw, "profiles.fast"));
         assert!(!remove_path(&mut raw, "profiles.fast"));
         assert_eq!(parse_scalar("[a, b]"), json!(["a", "b"]));
@@ -875,6 +923,12 @@ mod yaml_gotchas {
         let v = parse_yaml("defaults:\n  retry:\n    max_attempts: 3\n    on: [rate_limited, agent_error]\n    backoff: 5s\n").unwrap();
         let config: Config = serde_json::from_value(v).unwrap();
         assert_eq!(config.defaults.retry.on, ["rate_limited", "agent_error"]);
-        assert_eq!(parse_yaml("a: [yes, no, on, off]").unwrap()["a"].as_array().unwrap().len(), 4);
+        // Words YAML 1.1 read as booleans are names here.
+        assert_eq!(parse_yaml("a: [yes, no, on, off, y, true]").unwrap()["a"], json!(["yes", "no", "on", "off", "y", true]));
+        assert_eq!(parse_yaml("model: 0613
+count: 12").unwrap(), json!({"model": "0613", "count": 12}));
+        assert_eq!(parse_scalar("no"), json!("no"));
+        assert_eq!(parse_scalar("[a, b]"), json!(["a", "b"]));
+        assert_eq!(parse_scalar("4"), json!(4));
     }
 }

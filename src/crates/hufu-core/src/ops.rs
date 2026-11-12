@@ -105,19 +105,34 @@ pub fn agents(loaded: &Loaded, adapters: &dyn AdapterRegistry, probe: bool) -> V
 // Editing configuration
 // ---------------------------------------------------------------------------------------------
 
-/// The file an edit goes to: the user-wide one, or `.hufu/config.yaml` of a project.
-pub fn config_target(home: &Home, project: Option<&Path>) -> PathBuf {
+/// The file an edit goes to. For a project file, `base` is the user-wide file it overlays, so
+/// that the edit is checked against what Hufu will actually load.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Target {
+    pub path: PathBuf,
+    pub base: Option<PathBuf>,
+}
+
+impl Target {
+    pub fn display(&self) -> std::path::Display<'_> {
+        self.path.display()
+    }
+}
+
+/// The user-wide file, or `.hufu/config.yaml` of a project.
+pub fn config_target(home: &Home, project: Option<&Path>) -> Target {
     match project {
-        Some(dir) => dir.join(".hufu").join("config.yaml"),
-        None => home.config_file(),
+        Some(dir) => Target { path: dir.join(".hufu").join("config.yaml"), base: Some(home.config_file()) },
+        None => Target { path: home.config_file(), base: None },
     }
 }
 
 /// Applies an edit to a configuration file. The file is only written if the result is valid.
-pub fn edit(path: &Path, adapters: &dyn AdapterRegistry, change: impl FnOnce(&mut Value) -> Result<()>) -> Result<()> {
-    let mut raw = config::read_raw(path)?;
+pub fn edit(target: &Target, adapters: &dyn AdapterRegistry, change: impl FnOnce(&mut Value) -> Result<()>) -> Result<()> {
+    let mut raw = config::read_raw(&target.path)?;
     change(&mut raw)?;
-    config::write_raw(path, &raw, adapters)
+    let base = target.base.as_deref().map(config::read_raw).transpose()?;
+    config::write_raw(&target.path, &raw, base.as_ref(), adapters)
 }
 
 fn check_name(kind: &str, name: &str) -> Result<()> {
@@ -126,7 +141,7 @@ fn check_name(kind: &str, name: &str) -> Result<()> {
 }
 
 /// Creates or replaces a profile. `body` is the profile as it would appear in YAML.
-pub fn profile_set(path: &Path, adapters: &dyn AdapterRegistry, name: &str, body: Value, merge: bool) -> Result<()> {
+pub fn profile_set(path: &Target, adapters: &dyn AdapterRegistry, name: &str, body: Value, merge: bool) -> Result<()> {
     check_name("profile", name)?;
     edit(path, adapters, |raw| {
         let mut body = body;
@@ -157,13 +172,13 @@ fn remove_named(raw: &mut Value, section: &str, name: &str) -> bool {
     raw.get_mut(section).and_then(Value::as_object_mut).map(|m| m.remove(name).is_some()).unwrap_or(false)
 }
 
-pub fn profile_remove(path: &Path, adapters: &dyn AdapterRegistry, name: &str) -> Result<()> {
+pub fn profile_remove(path: &Target, adapters: &dyn AdapterRegistry, name: &str) -> Result<()> {
     edit(path, adapters, |raw| {
         if remove_named(raw, "profiles", name) { Ok(()) } else { Err(HufuError::usage(format!("{} has no profile `{name}`", path.display()))) }
     })
 }
 
-pub fn pool_set(path: &Path, adapters: &dyn AdapterRegistry, name: &str, members: &[String], strategy: Option<&str>, description: Option<&str>) -> Result<()> {
+pub fn pool_set(path: &Target, adapters: &dyn AdapterRegistry, name: &str, members: &[String], strategy: Option<&str>, description: Option<&str>) -> Result<()> {
     check_name("pool", name)?;
     edit(path, adapters, |raw| {
         let mut body = json!({"members": members});
@@ -185,17 +200,17 @@ pub fn pool_set(path: &Path, adapters: &dyn AdapterRegistry, name: &str, members
     })
 }
 
-pub fn pool_remove(path: &Path, adapters: &dyn AdapterRegistry, name: &str) -> Result<()> {
+pub fn pool_remove(path: &Target, adapters: &dyn AdapterRegistry, name: &str) -> Result<()> {
     edit(path, adapters, |raw| {
         if remove_named(raw, "pools", name) { Ok(()) } else { Err(HufuError::usage(format!("{} has no pool `{name}`", path.display()))) }
     })
 }
 
-pub fn config_set(path: &Path, adapters: &dyn AdapterRegistry, key: &str, value: Value) -> Result<()> {
+pub fn config_set(path: &Target, adapters: &dyn AdapterRegistry, key: &str, value: Value) -> Result<()> {
     edit(path, adapters, |raw| config::set_path(raw, key, value))
 }
 
-pub fn config_unset(path: &Path, adapters: &dyn AdapterRegistry, key: &str) -> Result<()> {
+pub fn config_unset(path: &Target, adapters: &dyn AdapterRegistry, key: &str) -> Result<()> {
     edit(path, adapters, |raw| {
         if config::remove_path(raw, key) { Ok(()) } else { Err(HufuError::usage(format!("{} does not set `{key}`", path.display()))) }
     })
@@ -310,7 +325,7 @@ mod tests {
     #[test]
     fn profiles_and_pools_are_edited_and_validated() {
         let dir = std::env::temp_dir().join(format!("hufu-ops-{}", hufu_contract::time::new_id("t")));
-        let path = dir.join("config.yaml");
+        let path = Target { path: dir.join("config.yaml"), base: None };
         let reg = kinds();
         profile_set(&path, reg, "codex-work", json!({"adapter": "codex-cli", "account": "work", "home": "~/.codex-work"}), false).unwrap();
         profile_set(&path, reg, "codex-home", json!({"adapter": "codex-cli", "account": "home", "home": "~/.codex-home"}), false).unwrap();
@@ -318,7 +333,7 @@ mod tests {
         pool_set(&path, reg, "codex-any", &["codex-work".into(), "codex-home".into()], Some("round-robin"), None).unwrap();
         config_set(&path, reg, "roles.advisor", json!("codex-work")).unwrap();
         config_set(&path, reg, "roles.executors", json!(["codex-any"])).unwrap();
-        let raw = config::read_raw(&path).unwrap();
+        let raw = config::read_raw(&path.path).unwrap();
         assert_eq!(config::get_path(&raw, "profiles.codex-work.effort"), Some(&json!("high")));
         assert_eq!(config::get_path(&raw, "profiles.codex-work.adapter"), Some(&json!("codex-cli")), "a merge keeps what was there");
         assert_eq!(config::get_path(&raw, "profiles.codex-work.account"), None, "null removes a field");

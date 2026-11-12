@@ -168,7 +168,7 @@ pub fn pid_alive(pid: u32) -> bool {
         // SAFETY: signal 0 performs the permission and existence check only.
         let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
         if r == 0 {
-            return true;
+            return !is_zombie(pid);
         }
         std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
@@ -200,10 +200,62 @@ pub fn terminate_tree(pid: u32) {
     let _ = pid;
 }
 
+/// A process that has ended but was never collected by its parent still answers signal 0.
+/// That happens where nothing reaps orphans, for example in a container without an init.
+#[cfg(unix)]
+fn is_zombie(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // "pid (comm) S ...": the name may hold spaces and brackets, so read after the last one.
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| stat.rsplit_once(')').map(|(_, rest)| rest.trim_start().starts_with(['Z', 'X'])))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+/// Every process below `pid`, from the process table. A child that moved to its own process
+/// group is not reached by a signal to its parent's group, so the forced path looks it up.
+#[cfg(unix)]
+fn descendants(pid: u32) -> Vec<u32> {
+    let Ok(out) = Command::new("ps").args(["-A", "-o", "pid=,ppid="]).stdin(Stdio::null()).stderr(Stdio::null()).output() else {
+        return Vec::new();
+    };
+    let table: Vec<(u32, u32)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+        })
+        .collect();
+    let mut found: Vec<u32> = Vec::new();
+    let mut frontier = vec![pid];
+    while let Some(parent) = frontier.pop() {
+        for (child, of) in &table {
+            if *of == parent && *child > 1 && !found.contains(child) {
+                found.push(*child);
+                frontier.push(*child);
+            }
+        }
+    }
+    found
+}
+
 /// Forcibly stops a process and everything it started.
 pub fn kill_tree(pid: u32) {
     #[cfg(unix)]
-    signal_group(pid, libc::SIGKILL);
+    {
+        let below = descendants(pid);
+        signal_group(pid, libc::SIGKILL);
+        for child in below {
+            signal_group(child, libc::SIGKILL);
+        }
+    }
     #[cfg(windows)]
     {
         let _ = Command::new("taskkill")

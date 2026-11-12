@@ -299,6 +299,7 @@ pub fn read_ledger(home: &Home, id: &str) -> Vec<Value> {
 
 /// Validates a mission request and writes its record. Nothing runs yet.
 pub fn create(ctx: &Context, spec: &MissionSpec, base_dir: &Path) -> Result<Mission> {
+    ctx.config.ensure_valid(ctx.adapters)?;
     if let Some(v) = spec.version {
         if v != FORMAT_VERSION {
             return Err(HufuError::usage(format!("mission file version {v} is not supported; this build reads version {FORMAT_VERSION}")));

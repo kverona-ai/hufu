@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use hufu_contract::time::{new_id, now_rfc3339, parse_duration};
 use hufu_contract::{AdapterRegistry, Effort, EffortFallback, FORMAT_VERSION, LaunchPlan, McpServerSpec, Profile, RunRequest, Tier, effort_list, proc, tier_list};
@@ -42,7 +43,13 @@ pub struct DaemonInfo {
     pub pid: u32,
     pub started_at: String,
     pub version: String,
+    /// Refreshed every few seconds, so that a recycled process id is not mistaken for the daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_at: Option<String>,
 }
+
+/// How long a daemon may go without refreshing its file before it counts as gone.
+pub const DAEMON_STALE_AFTER: Duration = Duration::from_secs(20);
 
 pub fn daemon_file(home: &Home) -> PathBuf {
     home.run().join("daemon.json")
@@ -51,7 +58,9 @@ pub fn daemon_file(home: &Home) -> PathBuf {
 /// The running daemon, if there is one.
 pub fn daemon_info(home: &Home) -> Option<DaemonInfo> {
     let info: DaemonInfo = store::read_json(&daemon_file(home)).ok()?;
-    proc::pid_alive(info.pid).then_some(info)
+    let seen = info.heartbeat_at.as_deref().or(Some(info.started_at.as_str())).and_then(hufu_contract::time::parse_rfc3339)?;
+    let fresh = hufu_contract::time::now_ms().saturating_sub(seen) < DAEMON_STALE_AFTER.as_millis() as u64;
+    (proc::pid_alive(info.pid) && fresh).then_some(info)
 }
 
 struct Fit {
@@ -206,6 +215,7 @@ fn seconds(field: &str, text: &str) -> Result<u64> {
 
 /// Validates a task and resolves it into the job spec that would run. Nothing is written.
 pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec> {
+    ctx.config.ensure_valid(ctx.adapters)?;
     if let Some(v) = task.version {
         if v != FORMAT_VERSION {
             return Err(HufuError::usage(format!("task spec version {v} is not supported; this build reads version {FORMAT_VERSION}")));

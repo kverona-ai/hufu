@@ -90,8 +90,9 @@ pub fn run(home: &Home, version: &str) -> Result<()> {
         }
     }
     let _ = std::fs::remove_file(stop_marker(home));
-    let info = DaemonInfo { pid: std::process::id(), started_at: now_rfc3339(), version: version.to_string() };
+    let mut info = DaemonInfo { pid: std::process::id(), started_at: now_rfc3339(), version: version.to_string(), heartbeat_at: Some(now_rfc3339()) };
     store::write_json(&submit::daemon_file(home), &info)?;
+    let mut beat = Instant::now();
     let started_ms = hufu_contract::time::now_ms();
     let mut launched = BTreeMap::new();
     let mut config = config::load(home, &home.root).map(|l| l.config).unwrap_or_default();
@@ -102,8 +103,13 @@ pub fn run(home: &Home, version: &str) -> Result<()> {
             break;
         }
         // Someone else took over the pid file: step aside.
-        if status(home).map(|d| d.pid != info.pid).unwrap_or(true) {
+        if store::read_json::<DaemonInfo>(&submit::daemon_file(home)).map(|d| d.pid != info.pid).unwrap_or(false) {
             return Ok(());
+        }
+        if beat.elapsed() > Duration::from_secs(3) {
+            info.heartbeat_at = Some(now_rfc3339());
+            let _ = store::write_json(&submit::daemon_file(home), &info);
+            beat = Instant::now();
         }
         if config_read.elapsed() > Duration::from_secs(5) {
             if let Ok(loaded) = config::load(home, &home.root) {

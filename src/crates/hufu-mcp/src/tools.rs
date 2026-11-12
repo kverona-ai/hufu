@@ -118,7 +118,11 @@ const TOOLS: &[Tool] = &[
                     "cwd": {"type": "string"},
                     "isolation": {"type": "string", "enum": ["none", "worktree"]},
                     "review": {"type": "string", "enum": ["always", "on_failure", "never"]},
-                    "max_tier": {"type": "string", "enum": TIERS}
+                    "max_tier": {"type": "string", "enum": TIERS},
+                    "title": {"type": "string"},
+                    "budgets": {"type": "object", "description": "max_tasks, max_rounds_per_task, max_wall_clock (for example 2h), max_tokens, max_cost."},
+                    "acceptance_commands": {"type": "array", "items": {"type": "string"}, "description": "Command prefixes the advisor may use in acceptance checks, for example `cargo test`."},
+                    "max_parallel": {"type": "integer", "minimum": 1}
                 }),
                 &["goal"],
             )
@@ -134,6 +138,18 @@ const TOOLS: &[Tool] = &[
         name: "hufu_mission_abort",
         title: "Abort a mission",
         description: "Stops a mission and cancels its running jobs. Finished work is kept.",
+        schema: || obj(json!({"mission": {"type": "string"}}), &["mission"]),
+    },
+    Tool {
+        name: "hufu_mission_pause",
+        title: "Pause a mission",
+        description: "Lets the running jobs of a mission finish and starts no new ones. Continue with hufu_mission_resume.",
+        schema: || obj(json!({"mission": {"type": "string"}}), &["mission"]),
+    },
+    Tool {
+        name: "hufu_mission_resume",
+        title: "Resume a mission",
+        description: "Continues a paused mission, or one whose driver stopped (for example after a restart). Finished tasks are not repeated.",
         schema: || obj(json!({"mission": {"type": "string"}}), &["mission"]),
     },
     Tool {
@@ -256,7 +272,7 @@ impl Server<'_> {
         Ok((config::load(&self.home, &dir)?, dir))
     }
 
-    fn target(&self, args: &Value) -> PathBuf {
+    fn target(&self, args: &Value) -> ops::Target {
         ops::config_target(&self.home, flag(args, "project").then_some(self.cwd.as_path()))
     }
 }
@@ -422,6 +438,16 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             let id = mission::resolve(home, need(args, "mission")?)?;
             let m = mission::abort(home, &id)?;
             Ok(json!({"mission": m.id, "state": m.state.as_str(), "note": "running jobs are being cancelled"}))
+        }
+        "hufu_mission_pause" => {
+            let id = mission::resolve(home, need(args, "mission")?)?;
+            mission::pause(home, &id)?;
+            Ok(json!({"mission": id, "pausing": true, "note": "running jobs finish first; continue with hufu_mission_resume"}))
+        }
+        "hufu_mission_resume" => {
+            let id = mission::resolve(home, need(args, "mission")?)?;
+            mission::resume(home, &id)?;
+            Ok(json!({"mission": id, "resumed": true}))
         }
         "hufu_doctor" => {
             let (loaded, _) = server.load(None)?;

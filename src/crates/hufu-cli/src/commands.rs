@@ -50,7 +50,7 @@ impl App {
         }
     }
 
-    fn target(&self, project: bool) -> PathBuf {
+    fn target(&self, project: bool) -> ops::Target {
         ops::config_target(&self.home, project.then_some(self.cwd.as_path()))
     }
 }
@@ -775,12 +775,12 @@ fn cmd_config(app: &App, c: ConfigCommand) -> Result<i32> {
         ConfigCommand::Set { key, value, project } => {
             let path = app.target(project);
             ops::config_set(&path, &app.adapters, &key, config::parse_scalar(&value))?;
-            app.out(&json!({"written": path, "key": key}), || println!("set {key} in {}", path.display()));
+            app.out(&json!({"written": path.path, "key": key}), || println!("set {key} in {}", path.display()));
         }
         ConfigCommand::Unset { key, project } => {
             let path = app.target(project);
             ops::config_unset(&path, &app.adapters, &key)?;
-            app.out(&json!({"written": path, "key": key}), || println!("removed {key} from {}", path.display()));
+            app.out(&json!({"written": path.path, "key": key}), || println!("removed {key} from {}", path.display()));
         }
         ConfigCommand::Path => {
             let loaded = app.load()?;
@@ -847,14 +847,14 @@ fn cmd_profile(app: &App, c: ProfileCommand) -> Result<i32> {
             }
             let path = app.target(a.project);
             ops::profile_set(&path, &app.adapters, &a.name, profile_body(&a)?, false)?;
-            app.out(&json!({"written": path, "profile": a.name}), || println!("profile `{}` written to {}. Check it with: hufu doctor", a.name, path.display()));
+            app.out(&json!({"written": path.path, "profile": a.name}), || println!("profile `{}` written to {}. Check it with: hufu doctor", a.name, path.display()));
         }
         ProfileCommand::Set(a) => {
             let path = app.target(a.project);
             // A preset has no entry in the file yet; changing one starts from the preset.
             let loaded = app.load()?;
             let mut body = profile_body(&a)?;
-            let in_file = config::get_path(&config::read_raw(&path)?, "profiles").and_then(|p| p.get(&a.name)).is_some();
+            let in_file = config::get_path(&config::read_raw(&path.path)?, "profiles").and_then(|p| p.get(&a.name)).is_some();
             if !in_file {
                 let base = loaded.config.profile(&a.name).ok_or_else(|| HufuError::usage(format!("no profile `{}`; create it with `hufu profile add`", a.name)))?;
                 let mut merged = serde_json::to_value(base).map_err(|e| HufuError::internal(e.to_string()))?;
@@ -867,12 +867,12 @@ fn cmd_profile(app: &App, c: ProfileCommand) -> Result<i32> {
                 body = merged;
             }
             ops::profile_set(&path, &app.adapters, &a.name, body, true)?;
-            app.out(&json!({"written": path, "profile": a.name}), || println!("profile `{}` updated in {}", a.name, path.display()));
+            app.out(&json!({"written": path.path, "profile": a.name}), || println!("profile `{}` updated in {}", a.name, path.display()));
         }
         ProfileCommand::Remove { name, project } => {
             let path = app.target(project);
             ops::profile_remove(&path, &app.adapters, &name)?;
-            app.out(&json!({"written": path, "removed": name}), || println!("profile `{name}` removed from {}", path.display()));
+            app.out(&json!({"written": path.path, "removed": name}), || println!("profile `{name}` removed from {}", path.display()));
         }
         ProfileCommand::List => return cmd_agents(app, AgentsArgs { probe: false }),
         ProfileCommand::Show { name } => {
@@ -891,12 +891,12 @@ fn cmd_pool(app: &App, c: PoolCommand) -> Result<i32> {
         PoolCommand::Add { name, member, strategy, description, project } => {
             let path = app.target(project);
             ops::pool_set(&path, &app.adapters, &name, &member, strategy.as_deref(), description.as_deref())?;
-            app.out(&json!({"written": path, "pool": name}), || println!("pool `{name}` ({}) written to {}. Use it as an agent: hufu run -a {name} \"...\"", member.join(", "), path.display()));
+            app.out(&json!({"written": path.path, "pool": name}), || println!("pool `{name}` ({}) written to {}. Use it as an agent: hufu run -a {name} \"...\"", member.join(", "), path.display()));
         }
         PoolCommand::Remove { name, project } => {
             let path = app.target(project);
             ops::pool_remove(&path, &app.adapters, &name)?;
-            app.out(&json!({"written": path, "removed": name}), || println!("pool `{name}` removed from {}", path.display()));
+            app.out(&json!({"written": path.path, "removed": name}), || println!("pool `{name}` removed from {}", path.display()));
         }
         PoolCommand::List => {
             let loaded = app.load()?;
