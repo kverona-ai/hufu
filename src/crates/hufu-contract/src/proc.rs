@@ -154,7 +154,28 @@ pub fn detach(cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        keep_std_handles_private();
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+}
+
+/// Windows hands every inheritable handle to a new process, not only the ones named as its
+/// standard streams. A detached runner that inherited the caller's stdout pipe would keep that
+/// pipe open, and whoever reads `hufu run`'s output would wait for the whole job. The standard
+/// library duplicates what a child is meant to get, so the originals need not be inheritable.
+#[cfg(windows)]
+fn keep_std_handles_private() {
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: the handle comes from the system and is checked before use; clearing a flag
+        // on it does not close or change what it refers to.
+        unsafe {
+            let handle = GetStdHandle(id);
+            if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
     }
 }
 
@@ -194,7 +215,7 @@ pub fn pid_alive(pid: u32) -> bool {
 }
 
 /// Asks a process group to stop. On Windows there is no polite signal for a hidden console
-/// process, so this is a no-op and [`kill_tree`] does the work after the grace period.
+/// process, so this is a no-op and [`kill_tree`] does the work.
 pub fn terminate_tree(pid: u32) {
     #[cfg(unix)]
     signal_group(pid, libc::SIGTERM);
@@ -611,7 +632,8 @@ impl Streamed {
         if let Some(at) = self.stop_requested_at
             && !self.killed
             && self.exited_at.is_none()
-            && at.elapsed() >= kill_grace()
+            // Windows has no polite signal to wait out, so there the forced stop follows at once.
+            && (cfg!(windows) || at.elapsed() >= kill_grace())
         {
             self.killed = true;
             kill_tree(self.child.id());

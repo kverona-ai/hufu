@@ -26,7 +26,7 @@ serde-saphyr = "2"
 clap = { version = "4", features = ["derive"] }
 getrandom = "0.4"
 libc = "0.2"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
 
 hufu-contract = { path = "crates/hufu-contract", version = "0.1.0" }
 hufu-adapters = { path = "crates/hufu-adapters", version = "0.1.0" }

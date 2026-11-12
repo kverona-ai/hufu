@@ -253,7 +253,10 @@ fn retry<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.{}.{}.tmp", std::process::id(), now_ms()));
+    // The counter keeps two threads of one process apart within the same millisecond.
+    static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}.{}.{seq}.tmp", std::process::id(), now_ms()));
     {
         let mut f = std::fs::File::create(&tmp).at(&tmp)?;
         f.write_all(bytes).at(&tmp)?;
