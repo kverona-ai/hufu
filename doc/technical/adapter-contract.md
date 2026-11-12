@@ -155,6 +155,8 @@ let the agent decide".
 - Agents with more native levels than Hufu's scale (Codex `xhigh` and `ultra`, pi `minimal` and
   `xhigh`) can be reached with `effort: native:<value>`, which is passed through verbatim and
   validated only by the agent.
+- Kimi's control is a boolean, so only two levels map: `off` to `--no-thinking` and `high` to
+  `--thinking`.
 - Cursor has no known effort control ❓. If reasoning strength is encoded in its model ids, it is
   selected through `model`.
 
