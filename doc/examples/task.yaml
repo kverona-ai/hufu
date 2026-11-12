@@ -1,0 +1,31 @@
+# Sample task spec.
+# Submit with:  hufu run -f task.yaml
+# Format reference: doc/technical/technical-design.md, section 4.
+
+version: 1
+title: Share one in-flight token refresh
+
+prompt: |
+  Refactor the token refresh logic under src/auth so that concurrent callers
+  share a single in-flight refresh request.
+
+  Constraints:
+  - Keep the public API of src/auth/index.ts unchanged.
+  - Add or update unit tests under test/auth.
+  - Run the auth unit tests and report the result.
+
+agent: codex-high
+cwd: .
+permission: workspace-write
+effort: high
+timeout: 45m
+isolation: worktree              # work on a new branch in a new git worktree
+
+acceptance:                      # the tally check: all must pass for the work to be accepted
+  - command: npm test -- auth
+  - paths:
+      allow: ["src/auth/**", "test/auth/**"]
+      deny: ["**/*.lock"]
+
+labels:
+  area: auth

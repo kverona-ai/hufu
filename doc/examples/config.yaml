@@ -1,0 +1,71 @@
+# Sample Hufu configuration.
+# Location: ~/.hufu/config.yaml (user-wide) or <project>/.hufu/config.yaml (project overrides).
+# This file describes the planned format; see doc/technical/technical-design.md, section 3.
+#
+# Model ids below are examples taken from vendor documentation in November 2026.
+# Use the ids your own account offers (for instance from `agy models`).
+
+version: 1
+
+defaults:
+  permission: read-only        # least privilege unless a task says otherwise
+  effort: default              # pass no effort flag; let the agent decide
+  timeout: 30m
+  inactivity_timeout: 10m
+  isolation: none              # or: worktree
+
+limits:
+  max_concurrent_jobs: 4
+  per_profile:
+    codex-high: 2
+
+profiles:
+  # --- Headless CLI adapters -------------------------------------------------
+
+  codex-high:
+    description: Strong general executor for multi-file changes
+    adapter: codex-cli
+    model: gpt-6.1-sol
+    effort: high
+
+  agy-fast:
+    description: Fast, cheap executor for reading and summarising large trees
+    adapter: agy-cli
+    model: gemini-3.8-flash-medium
+    effort: low
+
+  # --- Agent Client Protocol profiles ----------------------------------------
+
+  kimi:
+    description: Kimi Code over ACP, so that permission requests are answered by Hufu
+    adapter: acp
+    command: [kimi, acp]
+    permission_requests: unverified   # change to "verified" after checking this agent
+
+  cursor:
+    description: Cursor agent over ACP
+    adapter: acp
+    command: [agent, acp]
+    env: [CURSOR_API_KEY]
+    permission_requests: unverified
+
+  # --- Open-API models through the pi harness --------------------------------
+
+  or-reasoner:
+    description: A reasoning model on OpenRouter; a good advisor
+    adapter: pi
+    provider: openrouter
+    model: vendor/model-slug          # any model slug the provider offers
+    effort: high
+    env: [OPENROUTER_API_KEY]         # the variable NAME; the value stays in your shell
+    allow_full_access: true           # pi has no permission system: full-access is its only tier
+    permission: full-access
+
+# Mission defaults (M3)
+missions:
+  review: on_failure                  # or: always
+  max_tier: workspace-write           # no task in a mission may exceed this
+  acceptance_commands:                # commands an advisor-written check may run
+    - npm test
+    - npm run typecheck
+    - npm run lint
