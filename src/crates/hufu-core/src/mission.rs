@@ -315,12 +315,12 @@ pub fn read_ledger(home: &Home, id: &str) -> Vec<Value> {
 /// Validates a mission request and writes its record. Nothing runs yet.
 pub fn create(ctx: &Context, spec: &MissionSpec, base_dir: &Path) -> Result<Mission> {
     ctx.config.ensure_valid(ctx.adapters)?;
-    if let Some(v) = spec.version {
-        if v != FORMAT_VERSION {
-            return Err(HufuError::usage(format!(
-                "mission file version {v} is not supported; this build reads version {FORMAT_VERSION}"
-            )));
-        }
+    if let Some(v) = spec.version
+        && v != FORMAT_VERSION
+    {
+        return Err(HufuError::usage(format!(
+            "mission file version {v} is not supported; this build reads version {FORMAT_VERSION}"
+        )));
     }
     if spec.goal.trim().is_empty() {
         return Err(HufuError::usage(
@@ -815,10 +815,10 @@ impl Driver<'_> {
     }
 
     fn add_usage(&mut self, job: &str) {
-        if let Ok(Some(result)) = store::load_result(self.ctx.home, job) {
-            if let Some(u) = &result.usage {
-                self.mission.usage.add(u);
-            }
+        if let Ok(Some(result)) = store::load_result(self.ctx.home, job)
+            && let Some(u) = &result.usage
+        {
+            self.mission.usage.add(u);
         }
     }
 
@@ -834,15 +834,15 @@ impl Driver<'_> {
                 b.max_wall_clock
             ));
         }
-        if let Some(max) = b.max_tokens {
-            if self.mission.usage.tokens() > max {
-                return Some(format!("{} tokens used, over the limit of {max}", self.mission.usage.tokens()));
-            }
+        if let Some(max) = b.max_tokens
+            && self.mission.usage.tokens() > max
+        {
+            return Some(format!("{} tokens used, over the limit of {max}", self.mission.usage.tokens()));
         }
-        if let (Some(max), Some(cost)) = (b.max_cost, self.mission.usage.cost_usd) {
-            if cost > max {
-                return Some(format!("${cost:.2} spent, over the limit of ${max:.2}"));
-            }
+        if let (Some(max), Some(cost)) = (b.max_cost, self.mission.usage.cost_usd)
+            && cost > max
+        {
+            return Some(format!("${cost:.2} spent, over the limit of ${max:.2}"));
         }
         None
     }
@@ -1011,16 +1011,16 @@ impl Driver<'_> {
                 .and_then(|r| r.session)
                 .map(|s| s.resumable)
                 .unwrap_or(false);
-            if resumable {
-                if let Ok(state) = submit::resume(
+            if resumable
+                && let Ok(state) = submit::resume(
                     &self.ctx,
                     prev,
                     &format!("A reviewer looked at your work and asks for changes:\n{feedback}"),
                     true,
                     |spec| spec.title = format!("{} (revision)", task.title),
-                ) {
-                    started = Some(state.id);
-                }
+                )
+            {
+                started = Some(state.id);
             }
         }
         let id = match started {
@@ -1379,10 +1379,10 @@ pub fn run(home: &Home, config: &Config, adapters: &dyn AdapterRegistry, id: &st
         }
     }
     // Work left in the mission's own worktree is committed to its branch, so nothing is lost.
-    if driver.mission.branch.is_some() {
-        if let Some(root) = workspace::repo_root(Path::new(&driver.mission.workdir)) {
-            workspace::commit_all(&root, &format!("hufu: mission {} ({})", driver.mission.title, driver.mission.id));
-        }
+    if driver.mission.branch.is_some()
+        && let Some(root) = workspace::repo_root(Path::new(&driver.mission.workdir))
+    {
+        workspace::commit_all(&root, &format!("hufu: mission {} ({})", driver.mission.title, driver.mission.id));
     }
     driver.mission.finished_at = Some(now_rfc3339());
     driver.mission.driver_pid = None;

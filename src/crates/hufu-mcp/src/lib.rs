@@ -67,21 +67,20 @@ impl Server<'_> {
             .pointer(&format!("/_meta/{}", VERSION_META.replace('/', "~1")))
             .and_then(Value::as_str)
             .map(str::to_string);
-        if let Some(v) = &stated {
-            if v != STATELESS_VERSION && !HANDSHAKE_VERSIONS.contains(&v.as_str()) {
-                let mut supported = vec![STATELESS_VERSION];
-                supported.extend(HANDSHAKE_VERSIONS);
-                return Some(
-                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32022, "message": format!("unsupported protocol version `{v}`"), "data": {"supported": supported}}}),
-                );
-            }
+        if let Some(v) = &stated
+            && v != STATELESS_VERSION
+            && !HANDSHAKE_VERSIONS.contains(&v.as_str())
+        {
+            let mut supported = vec![STATELESS_VERSION];
+            supported.extend(HANDSHAKE_VERSIONS);
+            return Some(
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32022, "message": format!("unsupported protocol version `{v}`"), "data": {"supported": supported}}}),
+            );
         }
         let stateless = stated.as_deref() == Some(STATELESS_VERSION);
         let done = |mut result: Value| {
-            if stateless {
-                if let Some(obj) = result.as_object_mut() {
-                    obj.insert("resultType".into(), json!("complete"));
-                }
+            if stateless && let Some(obj) = result.as_object_mut() {
+                obj.insert("resultType".into(), json!("complete"));
             }
             Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
         };
@@ -108,7 +107,12 @@ impl Server<'_> {
                 if !tools::names(self.child_of.is_some()).contains(&name) {
                     return Some(error(&id, -32602, format!("unknown tool: {name}")));
                 }
-                match tools::call(self, name, &args) {
+                // A bug in one tool must not take the server, and the host's session, down with it.
+                let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tools::call(self, name, &args)))
+                    .unwrap_or_else(|_| {
+                        Err(hufu_core::error::HufuError::internal(format!("`{name}` hit a bug in Hufu")))
+                    });
+                match called {
                     Ok(value) => {
                         let text = match &value {
                             Value::String(s) => s.clone(),

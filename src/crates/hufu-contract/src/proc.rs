@@ -381,10 +381,10 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     if path == "~" {
         return home_dir().unwrap_or_else(|| PathBuf::from(path));
     }
-    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-        if let Some(home) = home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
+        && let Some(home) = home_dir()
+    {
+        return home.join(rest);
     }
     PathBuf::from(path)
 }
@@ -602,18 +602,20 @@ impl Streamed {
 
     /// Waits up to `poll` for the next line, enforcing the stop grace period as it goes.
     pub fn next(&mut self, sink: &dyn EventSink, poll: Duration) -> Step {
-        if self.exited_at.is_none() {
-            if let Ok(Some(status)) = self.child.try_wait() {
-                self.exited_at = Some(Instant::now());
-                self.exit_code = status.code();
-            }
+        if self.exited_at.is_none()
+            && let Ok(Some(status)) = self.child.try_wait()
+        {
+            self.exited_at = Some(Instant::now());
+            self.exit_code = status.code();
         }
-        if let Some(at) = self.stop_requested_at {
-            if !self.killed && self.exited_at.is_none() && at.elapsed() >= kill_grace() {
-                self.killed = true;
-                kill_tree(self.child.id());
-                let _ = self.child.kill();
-            }
+        if let Some(at) = self.stop_requested_at
+            && !self.killed
+            && self.exited_at.is_none()
+            && at.elapsed() >= kill_grace()
+        {
+            self.killed = true;
+            kill_tree(self.child.id());
+            let _ = self.child.kill();
         }
         if self.open_streams == 0 {
             return self.finish_or_idle(poll);

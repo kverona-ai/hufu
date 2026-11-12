@@ -532,24 +532,23 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             if files.len() > shown.len() { ", …" } else { "" }
         ));
     }
-    if end.state == State::Succeeded {
-        if let Some(wanted) = &spec.output_schema {
-            match outcome.structured_output.as_mut() {
-                None => {
+    if end.state == State::Succeeded
+        && let Some(wanted) = &spec.output_schema
+    {
+        match outcome.structured_output.as_mut() {
+            None => {
+                end.state = State::Failed;
+                end.reason = Some(reason::INVALID_OUTPUT.into());
+                end.detail = Some("the task asked for structured output, but the final answer contains no JSON".into());
+            }
+            Some(value) => {
+                schema::fill_nullable(wanted, value);
+                let errors = schema::validate(wanted, value);
+                if !errors.is_empty() {
                     end.state = State::Failed;
                     end.reason = Some(reason::INVALID_OUTPUT.into());
                     end.detail =
-                        Some("the task asked for structured output, but the final answer contains no JSON".into());
-                }
-                Some(value) => {
-                    schema::fill_nullable(wanted, value);
-                    let errors = schema::validate(wanted, value);
-                    if !errors.is_empty() {
-                        end.state = State::Failed;
-                        end.reason = Some(reason::INVALID_OUTPUT.into());
-                        end.detail =
-                            Some(format!("the structured output does not match the schema: {}", errors.join("; ")));
-                    }
+                        Some(format!("the structured output does not match the schema: {}", errors.join("; ")));
                 }
             }
         }
@@ -671,10 +670,11 @@ pub fn run_job(home: &Home, adapters: &dyn AdapterRegistry, id: &str) -> Result<
         return Ok(state);
     }
     let me = std::process::id();
-    if let Some(pid) = state.runner_pid {
-        if pid != me && proc::pid_alive(pid) {
-            return Err(HufuError::usage(format!("job `{id}` already has a runner (pid {pid})")));
-        }
+    if let Some(pid) = state.runner_pid
+        && pid != me
+        && proc::pid_alive(pid)
+    {
+        return Err(HufuError::usage(format!("job `{id}` already has a runner (pid {pid})")));
     }
     state.runner_pid = Some(me);
     state.queue = None;
@@ -701,7 +701,17 @@ pub fn run_job(home: &Home, adapters: &dyn AdapterRegistry, id: &str) -> Result<
     }
     let end = std::thread::scope(|scope| {
         scope.spawn(|| watchdog(&shared));
-        let end = drive(&shared, &sink, &spec, &config, adapters);
+        // A bug in the runner must still end the job with a reason instead of leaving it to be found lost.
+        let driven =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drive(&shared, &sink, &spec, &config, adapters)));
+        let end = driven.unwrap_or_else(|panic| {
+            let what = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown".into());
+            End::new(&spec).fail(reason::INTERNAL, format!("the runner hit a bug: {what}"))
+        });
         let state = write_end(&shared, &sink, &spec, end);
         shared.done.store(true, Ordering::SeqCst);
         state

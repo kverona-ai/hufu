@@ -217,15 +217,15 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
             if let Some(u) = v.get("usage") {
                 s.message_usage = Some(u.clone());
             }
-            if let Some(ev) = v.get("assistantMessageEvent") {
-                if ev.get("type").and_then(Value::as_str) == Some("error") {
-                    let msg = ev
-                        .get("error")
-                        .map(common::title_of)
-                        .filter(|m| !m.is_empty())
-                        .unwrap_or_else(|| "the model call failed".into());
-                    s.c.fail(sink, &msg);
-                }
+            if let Some(ev) = v.get("assistantMessageEvent")
+                && ev.get("type").and_then(Value::as_str) == Some("error")
+            {
+                let msg = ev
+                    .get("error")
+                    .map(common::title_of)
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or_else(|| "the model call failed".into());
+                s.c.fail(sink, &msg);
             }
         }
         "message_end" => {

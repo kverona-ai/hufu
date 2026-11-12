@@ -234,10 +234,10 @@ fn a_mission_can_be_aborted() {
     let started = std::time::Instant::now();
     let job = loop {
         let (_, now) = env.json(&["mission", "status", &id]);
-        if let Some(job) = now["tasks"].get(0).and_then(|t| t["jobs"].get(0)).and_then(Value::as_str) {
-            if env.state(job)["state"] == "running" {
-                break job.to_string();
-            }
+        if let Some(job) = now["tasks"].get(0).and_then(|t| t["jobs"].get(0)).and_then(Value::as_str)
+            && env.state(job)["state"] == "running"
+        {
+            break job.to_string();
         }
         assert!(started.elapsed().as_secs() < 60, "the task never started: {now}");
         std::thread::sleep(std::time::Duration::from_millis(100));

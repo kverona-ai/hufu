@@ -131,10 +131,10 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
     match v.get("type").and_then(Value::as_str).unwrap_or("") {
         "assistant" => {
             // With partial output on, only the final flush (no timestamp_ms) is a complete message.
-            if v.get("timestamp_ms").is_none() {
-                if let Some(content) = v.pointer("/message/content") {
-                    c.message(sink, &common::text_of(content));
-                }
+            if v.get("timestamp_ms").is_none()
+                && let Some(content) = v.pointer("/message/content")
+            {
+                c.message(sink, &common::text_of(content));
             }
         }
         "tool_call" => {
@@ -165,10 +165,10 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
             let ok = result.get("success").is_some();
             c.tool(sink, id, kind, &title, if ok { "completed" } else { "failed" });
             if ok {
-                if kind == "edit" {
-                    if let Some(p) = args.get("path").and_then(Value::as_str) {
-                        c.touch(p);
-                    }
+                if kind == "edit"
+                    && let Some(p) = args.get("path").and_then(Value::as_str)
+                {
+                    c.touch(p);
                 }
             } else {
                 let text = result.to_string();

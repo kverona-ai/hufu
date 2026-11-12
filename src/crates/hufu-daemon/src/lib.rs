@@ -92,10 +92,10 @@ pub fn requeue_lost(home: &Home, since_ms: u64) -> usize {
 /// Runs the daemon in the foreground until it is asked to stop.
 pub fn run(home: &Home, version: &str) -> Result<()> {
     home.ensure()?;
-    if let Some(other) = status(home) {
-        if other.pid != std::process::id() {
-            return Err(HufuError::usage(format!("a daemon is already running (pid {})", other.pid)));
-        }
+    if let Some(other) = status(home)
+        && other.pid != std::process::id()
+    {
+        return Err(HufuError::usage(format!("a daemon is already running (pid {})", other.pid)));
     }
     let _ = std::fs::remove_file(stop_marker(home));
     let mut info = DaemonInfo {

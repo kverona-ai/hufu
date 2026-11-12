@@ -426,13 +426,12 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             let (loaded, _) = server.load(None)?;
             let max = loaded.config.defaults.result_chars;
             let mut clipped = false;
-            if !flag(args, "full") {
-                if let Some(message) = &result.final_message {
-                    if message.chars().count() > max {
-                        result.final_message = Some(message.chars().take(max).collect());
-                        clipped = true;
-                    }
-                }
+            if !flag(args, "full")
+                && let Some(message) = &result.final_message
+                && message.chars().count() > max
+            {
+                result.final_message = Some(message.chars().take(max).collect());
+                clipped = true;
             }
             let mut value = serde_json::to_value(&result).map_err(|e| HufuError::internal(e.to_string()))?;
             if clipped {

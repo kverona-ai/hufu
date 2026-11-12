@@ -130,16 +130,16 @@ fn check(root: &Value, schema: &Value, v: &Value, path: &str, errors: &mut Vec<S
         }
         _ => {}
     }
-    if let Some(options) = schema.get("enum").and_then(Value::as_array) {
-        if !options.contains(v) {
-            let shown: Vec<String> = options.iter().map(Value::to_string).collect();
-            errors.push(format!("{path}: must be one of {}", shown.join(", ")));
-        }
+    if let Some(options) = schema.get("enum").and_then(Value::as_array)
+        && !options.contains(v)
+    {
+        let shown: Vec<String> = options.iter().map(Value::to_string).collect();
+        errors.push(format!("{path}: must be one of {}", shown.join(", ")));
     }
-    if let Some(expected) = schema.get("const") {
-        if expected != v {
-            errors.push(format!("{path}: must be {expected}"));
-        }
+    if let Some(expected) = schema.get("const")
+        && expected != v
+    {
+        errors.push(format!("{path}: must be {expected}"));
     }
     let num = |key: &str| schema.get(key).and_then(Value::as_f64);
     match v {
@@ -169,41 +169,41 @@ fn check(root: &Value, schema: &Value, v: &Value, path: &str, errors: &mut Vec<S
                     check(root, sub, item, &format!("{path}[{i}]"), errors, depth + 1);
                 }
             }
-            if let Some(min) = num("minItems") {
-                if (items.len() as f64) < min {
-                    errors.push(format!("{path}: needs at least {min} items, has {}", items.len()));
-                }
+            if let Some(min) = num("minItems")
+                && (items.len() as f64) < min
+            {
+                errors.push(format!("{path}: needs at least {min} items, has {}", items.len()));
             }
-            if let Some(max) = num("maxItems") {
-                if (items.len() as f64) > max {
-                    errors.push(format!("{path}: allows at most {max} items, has {}", items.len()));
-                }
+            if let Some(max) = num("maxItems")
+                && (items.len() as f64) > max
+            {
+                errors.push(format!("{path}: allows at most {max} items, has {}", items.len()));
             }
         }
         Value::String(s) => {
             let len = s.chars().count() as f64;
-            if let Some(min) = num("minLength") {
-                if len < min {
-                    errors.push(format!("{path}: must be at least {min} characters long"));
-                }
+            if let Some(min) = num("minLength")
+                && len < min
+            {
+                errors.push(format!("{path}: must be at least {min} characters long"));
             }
-            if let Some(max) = num("maxLength") {
-                if len > max {
-                    errors.push(format!("{path}: must be at most {max} characters long"));
-                }
+            if let Some(max) = num("maxLength")
+                && len > max
+            {
+                errors.push(format!("{path}: must be at most {max} characters long"));
             }
         }
         Value::Number(n) => {
             let f = n.as_f64().unwrap_or(0.0);
-            if let Some(min) = num("minimum") {
-                if f < min {
-                    errors.push(format!("{path}: must be at least {min}"));
-                }
+            if let Some(min) = num("minimum")
+                && f < min
+            {
+                errors.push(format!("{path}: must be at least {min}"));
             }
-            if let Some(max) = num("maximum") {
-                if f > max {
-                    errors.push(format!("{path}: must be at most {max}"));
-                }
+            if let Some(max) = num("maximum")
+                && f > max
+            {
+                errors.push(format!("{path}: must be at most {max}"));
             }
         }
         _ => {}
@@ -216,10 +216,10 @@ fn check(root: &Value, schema: &Value, v: &Value, path: &str, errors: &mut Vec<S
     for sub in schema.get("allOf").and_then(Value::as_array).into_iter().flatten() {
         errors.extend(branch(sub));
     }
-    if let Some(options) = schema.get("anyOf").and_then(Value::as_array) {
-        if !options.iter().any(|s| branch(s).is_empty()) {
-            errors.push(format!("{path}: matches none of the `anyOf` alternatives"));
-        }
+    if let Some(options) = schema.get("anyOf").and_then(Value::as_array)
+        && !options.iter().any(|s| branch(s).is_empty())
+    {
+        errors.push(format!("{path}: matches none of the `anyOf` alternatives"));
     }
     if let Some(options) = schema.get("oneOf").and_then(Value::as_array) {
         let hits = options.iter().filter(|s| branch(s).is_empty()).count();
@@ -227,10 +227,10 @@ fn check(root: &Value, schema: &Value, v: &Value, path: &str, errors: &mut Vec<S
             errors.push(format!("{path}: must match exactly one `oneOf` alternative, matches {hits}"));
         }
     }
-    if let Some(sub) = schema.get("not") {
-        if branch(sub).is_empty() {
-            errors.push(format!("{path}: must not match the `not` schema"));
-        }
+    if let Some(sub) = schema.get("not")
+        && branch(sub).is_empty()
+    {
+        errors.push(format!("{path}: must not match the `not` schema"));
     }
 }
 

@@ -97,12 +97,12 @@ fn fit(ctx: &Context, profile: &Profile, task: &TaskSpec, opts: &Options) -> Res
             "`full-access` must be asked for explicitly: pass `--permission full-access`, or set it on a profile together with `allow_full_access: true`",
         ));
     }
-    if let Some(max) = opts.max_tier {
-        if permission > max {
-            return Err(HufuError::usage(format!(
-                "permission `{permission}` exceeds the mission's limit `{max}` (`missions.max_tier`)"
-            )));
-        }
+    if let Some(max) = opts.max_tier
+        && permission > max
+    {
+        return Err(HufuError::usage(format!(
+            "permission `{permission}` exceeds the mission's limit `{max}` (`missions.max_tier`)"
+        )));
     }
     if !caps.supports_tier(permission) {
         return Err(HufuError::usage(format!(
@@ -161,12 +161,14 @@ fn fit(ctx: &Context, profile: &Profile, task: &TaskSpec, opts: &Options) -> Res
 
     // Model.
     let model = task.model.clone().or_else(|| profile.model.clone());
-    if let Some(m) = &model {
-        if !caps.models.is_empty() && !caps.models.contains(m) && !caps.checked_at_runtime {
-            warnings.push(format!(
-                "model `{m}` is not in the list profile `{name}` reports; the agent decides whether it exists"
-            ));
-        }
+    if let Some(m) = &model
+        && !caps.models.is_empty()
+        && !caps.models.contains(m)
+        && !caps.checked_at_runtime
+    {
+        warnings.push(format!(
+            "model `{m}` is not in the list profile `{name}` reports; the agent decides whether it exists"
+        ));
     }
 
     if opts.resume_session.is_some() && !caps.resume {
@@ -221,10 +223,10 @@ fn resolve_cwd(task: &TaskSpec, base: &Path) -> Result<PathBuf> {
 fn strip_verbatim(path: PathBuf) -> PathBuf {
     if cfg!(windows) {
         let text = path.to_string_lossy();
-        if let Some(rest) = text.strip_prefix(r"\\?\") {
-            if !rest.starts_with("UNC\\") {
-                return PathBuf::from(rest);
-            }
+        if let Some(rest) = text.strip_prefix(r"\\?\")
+            && !rest.starts_with("UNC\\")
+        {
+            return PathBuf::from(rest);
         }
     }
     path
@@ -241,12 +243,12 @@ fn seconds(field: &str, text: &str) -> Result<u64> {
 /// Validates a task and resolves it into the job spec that would run. Nothing is written.
 pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec> {
     ctx.config.ensure_valid(ctx.adapters)?;
-    if let Some(v) = task.version {
-        if v != FORMAT_VERSION {
-            return Err(HufuError::usage(format!(
-                "task spec version {v} is not supported; this build reads version {FORMAT_VERSION}"
-            )));
-        }
+    if let Some(v) = task.version
+        && v != FORMAT_VERSION
+    {
+        return Err(HufuError::usage(format!(
+            "task spec version {v} is not supported; this build reads version {FORMAT_VERSION}"
+        )));
     }
     if task.prompt.trim().is_empty() {
         return Err(HufuError::usage(

@@ -20,6 +20,8 @@ pub struct Cli {
     pub command: Command,
 }
 
+// Parsed once per process: the size of the largest variant does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Hand a task to an agent as a background job.

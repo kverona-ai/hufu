@@ -153,14 +153,14 @@ pub fn profile_set(path: &Target, adapters: &dyn AdapterRegistry, name: &str, bo
     check_name("profile", name)?;
     edit(path, adapters, |raw| {
         let mut body = body;
-        if merge {
-            if let (Some(old), Some(new)) = (
+        if merge
+            && let (Some(old), Some(new)) = (
                 config::get_path(raw, &format!("profiles.{name}")).and_then(Value::as_object).cloned(),
                 body.as_object_mut(),
-            ) {
-                for (k, v) in old {
-                    new.entry(k).or_insert(v);
-                }
+            )
+        {
+            for (k, v) in old {
+                new.entry(k).or_insert(v);
             }
         }
         if let Some(obj) = body.as_object_mut() {

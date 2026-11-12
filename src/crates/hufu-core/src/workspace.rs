@@ -131,12 +131,11 @@ pub fn changed(before: &Snapshot, after: &Snapshot) -> Vec<String> {
             out.push(path.clone());
         }
     }
-    if let (Some(a), Some(b)) = (&before.head, &after.head) {
-        if a != b {
-            if let Some(names) = git_ok(&after.root, &["diff", "--name-only", a, b]) {
-                out.extend(names.lines().filter(|l| !l.is_empty()).map(str::to_string));
-            }
-        }
+    if let (Some(a), Some(b)) = (&before.head, &after.head)
+        && a != b
+        && let Some(names) = git_ok(&after.root, &["diff", "--name-only", a, b])
+    {
+        out.extend(names.lines().filter(|l| !l.is_empty()).map(str::to_string));
     }
     out.sort();
     out.dedup();

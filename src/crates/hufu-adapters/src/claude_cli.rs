@@ -177,10 +177,10 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
                             _ => name.to_string(),
                         };
                         let kind = common::tool_kind(name);
-                        if kind == "edit" {
-                            if let Some(p) = input.get("file_path").and_then(Value::as_str) {
-                                c.touch(p);
-                            }
+                        if kind == "edit"
+                            && let Some(p) = input.get("file_path").and_then(Value::as_str)
+                        {
+                            c.touch(p);
                         }
                         c.tool(
                             sink,

@@ -106,10 +106,10 @@ pub fn has_room(slots: &[SlotInfo], want: &Want) -> bool {
     if want.counted && slots.iter().filter(|s| s.counted).count() >= want.max_jobs {
         return false;
     }
-    if let Some(max) = want.max_for_profile {
-        if slots.iter().filter(|s| s.profile == want.profile).count() >= max {
-            return false;
-        }
+    if let Some(max) = want.max_for_profile
+        && slots.iter().filter(|s| s.profile == want.profile).count() >= max
+    {
+        return false;
     }
     if want.display && slots.iter().filter(|s| s.display).count() >= want.max_display {
         return false;

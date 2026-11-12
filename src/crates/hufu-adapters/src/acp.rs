@@ -244,10 +244,11 @@ impl Client<'_> {
                 None
             }
             (Some(method), _) => {
-                if method == "session/update" && !self.replaying {
-                    if let Some(update) = msg.pointer("/params/update") {
-                        self.update(update);
-                    }
+                if method == "session/update"
+                    && !self.replaying
+                    && let Some(update) = msg.pointer("/params/update")
+                {
+                    self.update(update);
                 }
                 None
             }
@@ -449,10 +450,10 @@ impl Client<'_> {
             .collect();
 
         // A profile that names an auth method wants it called up front (Cursor's documented flow).
-        if let Some(method) = self.profile.auth_method.clone() {
-            if let Err(e) = self.call("authenticate", json!({"methodId": method}), Some(HANDSHAKE)) {
-                return self.rpc_failure("authenticate", e);
-            }
+        if let Some(method) = self.profile.auth_method.clone()
+            && let Err(e) = self.call("authenticate", json!({"methodId": method}), Some(HANDSHAKE))
+        {
+            return self.rpc_failure("authenticate", e);
         }
 
         let servers: Vec<Value> = self
@@ -525,21 +526,21 @@ impl Client<'_> {
         self.c.session = Some(session_id.clone());
 
         let options = opened.get("configOptions").cloned().unwrap_or(Value::Null);
-        if let Some(model) = self.req.model.clone() {
-            if let Err(e) = self.set_option(
+        if let Some(model) = self.req.model.clone()
+            && let Err(e) = self.set_option(
                 &session_id,
                 &options,
                 "model",
                 std::slice::from_ref(&model),
                 &format!("model `{model}`"),
-            ) {
-                return e;
-            }
+            )
+        {
+            return e;
         }
-        if self.req.effort != Effort::Default {
-            if let Err(e) = self.set_effort(&session_id, &options) {
-                return e;
-            }
+        if self.req.effort != Effort::Default
+            && let Err(e) = self.set_effort(&session_id, &options)
+        {
+            return e;
         }
         if self.req.permission == Tier::ReadOnly {
             self.select_read_only_mode(&session_id, &opened);
@@ -772,10 +773,10 @@ fn paths_of(call: &Value) -> Vec<String> {
         }
     }
     for item in call.get("content").and_then(Value::as_array).into_iter().flatten() {
-        if item.get("type").and_then(Value::as_str) == Some("diff") {
-            if let Some(p) = item.get("path").and_then(Value::as_str) {
-                out.push(p.to_string());
-            }
+        if item.get("type").and_then(Value::as_str) == Some("diff")
+            && let Some(p) = item.get("path").and_then(Value::as_str)
+        {
+            out.push(p.to_string());
         }
     }
     out.sort();

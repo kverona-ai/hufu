@@ -8,10 +8,10 @@ use serde_json::Value;
 /// balanced `{...}` or `[...]` span.
 pub fn extract_json(text: &str) -> Option<Value> {
     let trimmed = text.trim();
-    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-        if v.is_object() || v.is_array() {
-            return Some(v);
-        }
+    if let Ok(v) = serde_json::from_str::<Value>(trimmed)
+        && (v.is_object() || v.is_array())
+    {
+        return Some(v);
     }
     let mut blocks = Vec::new();
     let mut rest = trimmed;
@@ -25,10 +25,10 @@ pub fn extract_json(text: &str) -> Option<Value> {
         rest = &after[body_start + end + 3..];
     }
     for block in blocks.iter().rev() {
-        if let Ok(v) = serde_json::from_str::<Value>(block.trim()) {
-            if v.is_object() || v.is_array() {
-                return Some(v);
-            }
+        if let Ok(v) = serde_json::from_str::<Value>(block.trim())
+            && (v.is_object() || v.is_array())
+        {
+            return Some(v);
         }
     }
     balanced_span(trimmed)

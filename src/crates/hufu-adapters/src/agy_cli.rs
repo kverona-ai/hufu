@@ -193,12 +193,12 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
                         if common::looks_like_denial(&text) {
                             s.c.deny(sink, &title, kind, text.trim());
                         }
-                    } else if done && kind == "edit" {
-                        if let Some(path) =
+                    } else if done
+                        && kind == "edit"
+                        && let Some(path) =
                             params.get("TargetFile").or_else(|| params.get("AbsolutePath")).and_then(Value::as_str)
-                        {
-                            s.c.touch(path);
-                        }
+                    {
+                        s.c.touch(path);
                     }
                 }
                 _ => {}
