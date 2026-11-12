@@ -14,7 +14,8 @@ impl Drop for Daemon<'_> {
 }
 
 fn state_file(env: &Env, job: &str) -> Value {
-    serde_json::from_str(&std::fs::read_to_string(env.job_file(job, "state.json")).unwrap_or_default()).unwrap_or(Value::Null)
+    serde_json::from_str(&std::fs::read_to_string(env.job_file(job, "state.json")).unwrap_or_default())
+        .unwrap_or(Value::Null)
 }
 
 #[test]
@@ -69,7 +70,9 @@ fn the_daemon_starts_queued_jobs_in_order() {
 
     let submitted = env.hufu(&["--json", "run", "-a", "codex", "[[fake:slow=1200]]"]).expect(0).json();
     assert_eq!(submitted["queue"], "daemon", "{submitted}");
-    let ids: Vec<String> = std::iter::once(submitted["job"].as_str().unwrap().to_string()).chain((0..3).map(|i| env.start(&["-a", "codex", &format!("job {i}")]))).collect();
+    let ids: Vec<String> = std::iter::once(submitted["job"].as_str().unwrap().to_string())
+        .chain((0..3).map(|i| env.start(&["-a", "codex", &format!("job {i}")])))
+        .collect();
     let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let mut wait = vec!["wait", "--timeout", "60s"];
     wait.extend(&refs);
@@ -119,7 +122,10 @@ fn the_daemon_restarts_a_lost_job_that_may_be_retried() {
     loop {
         let _ = env.state(&job); // reading the state is what notices the dead runner
         let now = state_file(&env, &job);
-        if now["state"] == "running" && now["runner_pid"].as_u64().map(|p| p != runner).unwrap_or(false) && now["agent_pid"].is_u64() {
+        if now["state"] == "running"
+            && now["runner_pid"].as_u64().map(|p| p != runner).unwrap_or(false)
+            && now["agent_pid"].is_u64()
+        {
             break;
         }
         assert!(started.elapsed().as_secs() < 60, "the job was not restarted: {now}");

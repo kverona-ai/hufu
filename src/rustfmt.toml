@@ -1,0 +1,3 @@
+# One style for the whole workspace; `cargo fmt --all --check` runs in CI.
+max_width = 120
+use_small_heuristics = "Max"

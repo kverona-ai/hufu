@@ -18,7 +18,9 @@ pub fn extract_json(text: &str) -> Option<Value> {
     while let Some(start) = rest.find("```") {
         let after = &rest[start + 3..];
         let body_start = after.find('\n').map(|i| i + 1).unwrap_or(0);
-        let Some(end) = after[body_start..].find("```") else { break };
+        let Some(end) = after[body_start..].find("```") else {
+            break;
+        };
         blocks.push(&after[body_start..body_start + end]);
         rest = &after[body_start + end + 3..];
     }

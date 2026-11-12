@@ -4,10 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// The current time as an RFC 3339 UTC timestamp with millisecond precision.
@@ -22,12 +19,7 @@ pub fn rfc3339(ms: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (y, m, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
 /// Parses the timestamps this module writes. Returns milliseconds since the epoch.
@@ -98,9 +90,7 @@ pub fn parse_duration(input: &str) -> Result<Duration, String> {
                 "invalid duration `{input}`: expected a number before `{c}`; examples: 90s, 30m, 2h, 1h30m"
             ));
         }
-        let n: u64 = digits
-            .parse()
-            .map_err(|_| format!("invalid duration `{input}`"))?;
+        let n: u64 = digits.parse().map_err(|_| format!("invalid duration `{input}`"))?;
         digits.clear();
         let unit_ms = match c {
             'd' => 86_400_000,
@@ -115,18 +105,14 @@ pub fn parse_duration(input: &str) -> Result<Duration, String> {
             }
             's' => 1000,
             _ => {
-                return Err(format!(
-                    "invalid duration `{input}`: unknown unit `{c}`; use ms, s, m, h or d"
-                ));
+                return Err(format!("invalid duration `{input}`: unknown unit `{c}`; use ms, s, m, h or d"));
             }
         };
         total_ms = total_ms.saturating_add(n.saturating_mul(unit_ms));
         any = true;
     }
     if !digits.is_empty() || !any {
-        return Err(format!(
-            "invalid duration `{input}`: missing unit; examples: 90s, 30m, 2h"
-        ));
+        return Err(format!("invalid duration `{input}`: missing unit; examples: 90s, 30m, 2h"));
     }
     Ok(Duration::from_millis(total_ms))
 }

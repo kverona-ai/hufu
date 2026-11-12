@@ -29,7 +29,10 @@ fn every_agent_flavor_runs_a_job_to_a_result() {
         assert_eq!(r["agent"]["permission"], tier);
         let message = r["final_message"].as_str().unwrap_or_default();
         assert!(message.contains(&format!("fake {flavor} ok")), "{profile}: {message}");
-        assert!(message.contains("Summarize the repository"), "{profile}: the prompt did not reach the agent: {message}");
+        assert!(
+            message.contains("Summarize the repository"),
+            "{profile}: the prompt did not reach the agent: {message}"
+        );
     }
     let (_, all) = env.json(&["status", "--all"]);
     assert_eq!(all["jobs"].as_array().unwrap().len(), 8);
@@ -86,7 +89,8 @@ fn a_workspace_write_job_reports_what_it_changed() {
 fn worktree_isolation_keeps_the_checkout_untouched() {
     let env = Env::new("worktree");
     env.git_init();
-    let (code, r) = env.run(&["-a", "codex", "-p", "workspace-write", "--isolation", "worktree", "[[fake:write=isolated.txt]]"]);
+    let (code, r) =
+        env.run(&["-a", "codex", "-p", "workspace-write", "--isolation", "worktree", "[[fake:write=isolated.txt]]"]);
     assert_eq!(code, 0, "{r}");
     let job = r["job"].as_str().unwrap();
     assert_eq!(r["changes"]["branch"], format!("hufu/{job}"));
@@ -119,13 +123,16 @@ fn the_tally_check_decides_the_verdict() {
     assert_eq!(r["verdict"], "rejected");
     assert_eq!(r["tally"][1]["passed"], false);
 
-    let (code, r) = env.run(&["-a", "codex", "-p", "workspace-write", "--allow-path", "src/**", "[[fake:write=docs/readme.txt]]"]);
+    let (code, r) =
+        env.run(&["-a", "codex", "-p", "workspace-write", "--allow-path", "src/**", "[[fake:write=docs/readme.txt]]"]);
     assert_eq!(code, 8, "{r}");
     assert_eq!(r["verdict"], "rejected");
-    let (code, r) = env.run(&["-a", "codex", "-p", "workspace-write", "--allow-path", "src/**", "[[fake:write=src/ok.txt]]"]);
+    let (code, r) =
+        env.run(&["-a", "codex", "-p", "workspace-write", "--allow-path", "src/**", "[[fake:write=src/ok.txt]]"]);
     assert_eq!(code, 0, "{r}");
     assert_eq!(r["verdict"], "accepted");
-    let (code, r) = env.run(&["-a", "codex", "-p", "workspace-write", "--deny-path", "**/*.lock", "[[fake:write=deps/app.lock]]"]);
+    let (code, r) =
+        env.run(&["-a", "codex", "-p", "workspace-write", "--deny-path", "**/*.lock", "[[fake:write=deps/app.lock]]"]);
     assert_eq!(code, 8, "{r}");
 
     // A job without checks is not judged at all.
@@ -149,7 +156,9 @@ fn skipped_actions_are_reported_and_strict_mode_fails_on_them() {
 fn acp_permission_requests_follow_the_tier() {
     let env = Env::new("acp-perm");
     env.config(json!({"profiles": {"acp-npm": {"adapter": "acp", "command": fake("acp"), "permission_requests": "verified", "allow_execute": ["npm test"]}}}));
-    let denied = |r: &Value| -> Vec<String> { r["denied_actions"].as_array().unwrap().iter().filter_map(|d| d["kind"].as_str().map(String::from)).collect() };
+    let denied = |r: &Value| -> Vec<String> {
+        r["denied_actions"].as_array().unwrap().iter().filter_map(|d| d["kind"].as_str().map(String::from)).collect()
+    };
     // At read-only both the write and the command are refused by Hufu, and the refusals are on record.
     let (code, r) = env.run(&["-a", "acp", "[[fake:permission]]"]);
     assert_eq!(code, 0, "{r}");
@@ -181,12 +190,20 @@ fn an_unverified_acp_agent_is_limited_to_full_access() {
 #[test]
 fn failures_carry_a_reason_and_the_matching_exit_code() {
     let env = Env::new("failures");
-    for (scenario, reason, exit) in [("crash", "agent_error", 3), ("empty", "empty_output", 3), ("auth", "auth_required", 10), ("rate-limit", "rate_limited", 3)] {
+    for (scenario, reason, exit) in [
+        ("crash", "agent_error", 3),
+        ("empty", "empty_output", 3),
+        ("auth", "auth_required", 10),
+        ("rate-limit", "rate_limited", 3),
+    ] {
         let (code, r) = env.run(&["-a", "codex", &format!("[[fake:{scenario}]]")]);
         assert_eq!(r["state"], "failed", "{scenario}: {r}");
         assert_eq!(r["reason"], reason, "{scenario}: {r}");
         assert_eq!(code, exit, "{scenario}");
-        assert!(r["detail"].as_str().map(|d| !d.is_empty()).unwrap_or(false), "{scenario}: a failure needs a detail: {r}");
+        assert!(
+            r["detail"].as_str().map(|d| !d.is_empty()).unwrap_or(false),
+            "{scenario}: a failure needs a detail: {r}"
+        );
     }
     // An agent that is not installed.
     env.config(json!({"profiles": {"ghost": {"adapter": "codex-cli", "command": ["hufu-no-such-binary-xyz"]}}}));
@@ -211,7 +228,8 @@ fn cancelling_stops_the_job_and_its_agent() {
     let env = Env::new("cancel");
     let job = env.start(&["-a", "codex", "[[fake:hang]]"]);
     env.until(&job, "running", |s| s["state"] == "running" && s["last_activity"].is_string());
-    let state: Value = serde_json::from_str(&std::fs::read_to_string(env.job_file(&job, "state.json")).unwrap()).unwrap();
+    let state: Value =
+        serde_json::from_str(&std::fs::read_to_string(env.job_file(&job, "state.json")).unwrap()).unwrap();
     let agent_pid = state["agent_pid"].as_u64().expect("the agent's pid is recorded") as u32;
     assert!(hufu_contract::proc::pid_alive(agent_pid));
 
@@ -269,7 +287,8 @@ fn a_job_whose_runner_died_is_reported_as_lost() {
     let env = Env::new("lost");
     let job = env.start(&["-a", "codex", "[[fake:hang]]"]);
     env.until(&job, "running", |s| s["state"] == "running" && s["last_activity"].is_string());
-    let state: Value = serde_json::from_str(&std::fs::read_to_string(env.job_file(&job, "state.json")).unwrap()).unwrap();
+    let state: Value =
+        serde_json::from_str(&std::fs::read_to_string(env.job_file(&job, "state.json")).unwrap()).unwrap();
     let agent = state["agent_pid"].as_u64().unwrap();
     kill(state["runner_pid"].as_u64().expect("the runner's pid is recorded"));
     let r = env.hufu(&["wait", &job, "--timeout", "30s"]);
@@ -326,7 +345,8 @@ fn round_robin_pools_spread_jobs_over_accounts() {
         },
         "pools": {"both": {"members": ["a1", "a2"], "strategy": "round-robin"}},
     }));
-    let used: Vec<String> = (0..4).map(|_| env.run(&["-a", "both", "x"]).1["agent"]["profile"].as_str().unwrap().to_string()).collect();
+    let used: Vec<String> =
+        (0..4).map(|_| env.run(&["-a", "both", "x"]).1["agent"]["profile"].as_str().unwrap().to_string()).collect();
     assert_eq!(used.iter().filter(|p| *p == "a1").count(), 2, "{used:?}");
     assert_eq!(used.iter().filter(|p| *p == "a2").count(), 2, "{used:?}");
 }
@@ -347,7 +367,10 @@ fn each_account_gets_its_own_login_directory_and_credentials() {
     }));
     let said = |args: &[&str]| env.run(args).1["final_message"].as_str().unwrap_or_default().to_string();
     assert_eq!(said(&["-a", "codex-a", "[[fake:env=CODEX_HOME]]"]), format!("CODEX_HOME={}", home_a.display()));
-    assert_eq!(said(&["-a", "claude-a", "[[fake:env=CLAUDE_CONFIG_DIR]]"]), format!("CLAUDE_CONFIG_DIR={}", home_a.display()));
+    assert_eq!(
+        said(&["-a", "claude-a", "[[fake:env=CLAUDE_CONFIG_DIR]]"]),
+        format!("CLAUDE_CONFIG_DIR={}", home_a.display())
+    );
     assert_eq!(said(&["-a", "codex-b", "[[fake:env=OPENAI_API_KEY]]"]), "OPENAI_API_KEY=secret-b");
     assert_eq!(said(&["-a", "codex-b", "[[fake:env=CODEX_HOME]]"]), "CODEX_HOME=<unset>");
     // Nothing the profile did not name reaches the agent.
@@ -394,7 +417,8 @@ fn structured_output_is_validated_against_the_schema() {
     )
     .unwrap();
     for agent in ["codex", "claude", "agy", "pi"] {
-        let (code, r) = env.run(&["-a", agent, "--schema", "schema.json", r#"[[fake:json={"ok":true,"summary":"done"}]]"#]);
+        let (code, r) =
+            env.run(&["-a", agent, "--schema", "schema.json", r#"[[fake:json={"ok":true,"summary":"done"}]]"#]);
         assert_eq!(code, 0, "{agent}: {r}");
         assert_eq!(r["structured_output"], json!({"ok": true, "summary": "done"}), "{agent}");
     }
@@ -409,7 +433,19 @@ fn structured_output_is_validated_against_the_schema() {
 #[test]
 fn a_dry_run_shows_the_invocation_and_creates_nothing() {
     let env = Env::new("dry");
-    let (code, doc) = env.json(&["run", "--dry-run", "-a", "codex", "-p", "workspace-write", "-e", "high", "-m", "gpt-x", "plan this"]);
+    let (code, doc) = env.json(&[
+        "run",
+        "--dry-run",
+        "-a",
+        "codex",
+        "-p",
+        "workspace-write",
+        "-e",
+        "high",
+        "-m",
+        "gpt-x",
+        "plan this",
+    ]);
     assert_eq!(code, 0, "{doc}");
     assert_eq!(doc["dry_run"], true);
     assert_eq!(doc["permission"], "workspace-write");
@@ -419,7 +455,9 @@ fn a_dry_run_shows_the_invocation_and_creates_nothing() {
     assert!(args.iter().any(|a| a.contains("high")), "{args:?}");
     let (_, all) = env.json(&["status", "--all"]);
     assert!(all["jobs"].as_array().unwrap().is_empty());
-    assert!(env.hufu(&["run", "--dry-run", "-a", "claude", "x"]).expect(0).stdout.contains("would run profile `claude`"));
+    assert!(
+        env.hufu(&["run", "--dry-run", "-a", "claude", "x"]).expect(0).stdout.contains("would run profile `claude`")
+    );
 }
 
 #[test]
@@ -428,7 +466,11 @@ fn requests_an_agent_cannot_honour_are_refused_before_anything_starts() {
     let refused = |args: &[&str], needle: &str| {
         let r = env.hufu(args);
         assert_eq!(r.code, 2, "{args:?}: {} {}", r.stdout, r.stderr);
-        assert!(r.stderr.to_lowercase().contains(&needle.to_lowercase()), "{args:?}: expected `{needle}` in: {}", r.stderr);
+        assert!(
+            r.stderr.to_lowercase().contains(&needle.to_lowercase()),
+            "{args:?}: expected `{needle}` in: {}",
+            r.stderr
+        );
     };
     refused(&["run", "-a", "nobody", "x"], "nobody");
     refused(&["run", "-a", "codex"], "prompt");
@@ -473,7 +515,8 @@ fn logs_show_normalized_events_and_the_agents_own_output() {
     let human = env.hufu(&["logs", job]).expect(0).stdout;
     assert!(human.contains("log.txt"), "{human}");
     let ndjson = env.hufu(&["--json", "logs", job]).expect(0).stdout;
-    let events: Vec<Value> = ndjson.lines().map(|l| serde_json::from_str(l).expect("one JSON document per line")).collect();
+    let events: Vec<Value> =
+        ndjson.lines().map(|l| serde_json::from_str(l).expect("one JSON document per line")).collect();
     let types: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
     assert_eq!(types.first(), Some(&"job.state"), "{types:?}");
     assert!(types.contains(&"tool.call") && types.contains(&"agent.message"), "{types:?}");
@@ -491,7 +534,8 @@ fn logs_show_normalized_events_and_the_agents_own_output() {
 #[test]
 fn old_jobs_are_pruned_and_active_ones_are_kept() {
     let env = Env::new("prune");
-    let done: Vec<String> = (0..3).map(|i| env.run(&["-a", "codex", &format!("job {i}")]).1["job"].as_str().unwrap().to_string()).collect();
+    let done: Vec<String> =
+        (0..3).map(|i| env.run(&["-a", "codex", &format!("job {i}")]).1["job"].as_str().unwrap().to_string()).collect();
     let active = env.start(&["-a", "codex", "[[fake:hang]]"]);
     let (_, dry) = env.json(&["prune", "--keep", "1", "--dry-run"]);
     assert_eq!(dry["removed_jobs"].as_array().map(Vec::len), Some(2), "{dry}");

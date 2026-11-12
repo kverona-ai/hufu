@@ -7,7 +7,7 @@ use std::time::Duration;
 use hufu_contract::proc::{self, StreamResult};
 pub use hufu_contract::proc::{expand_tilde, home_dir};
 use hufu_contract::{
-    AdapterError, DeniedAction, EventBody, EventSink, LaunchPlan, Profile, ProbeResult, RunOutcome, RunRequest,
+    AdapterError, DeniedAction, EventBody, EventSink, LaunchPlan, ProbeResult, Profile, RunOutcome, RunRequest,
     RunStatus, SessionRef, Usage, json::extract_json, reason,
 };
 use serde_json::Value;
@@ -21,11 +21,7 @@ pub struct Program {
 
 /// The command a profile runs: its own `command`, or the adapter's default.
 pub fn command_of(profile: &Profile, default: &[&str]) -> Vec<String> {
-    if profile.command.is_empty() {
-        default.iter().map(|s| s.to_string()).collect()
-    } else {
-        profile.command.clone()
-    }
+    if profile.command.is_empty() { default.iter().map(|s| s.to_string()).collect() } else { profile.command.clone() }
 }
 
 /// Finds the agent executable. `path_var` is the `PATH` the agent itself will see.
@@ -47,7 +43,12 @@ fn path_of(req: &RunRequest) -> Option<&str> {
 }
 
 /// Builds the process for a launch plan: resolved program, clean environment, workspace as cwd.
-pub fn command_from_plan(profile: &Profile, default: &[&str], req: &RunRequest, plan: &LaunchPlan) -> Result<Command, String> {
+pub fn command_from_plan(
+    profile: &Profile,
+    default: &[&str],
+    req: &RunRequest,
+    plan: &LaunchPlan,
+) -> Result<Command, String> {
     let program = resolve(profile, default, path_of(req))?;
     let mut cmd = proc::command_for(&program.path);
     // `plan.args` already starts with the profile's prefix arguments.
@@ -97,7 +98,12 @@ pub fn first_line(program: &Program, args: &[&str], timeout: Duration) -> Option
 pub fn probe_cli(profile: &Profile, default: &[&str], install_hint: &str) -> (ProbeResult, Option<Program>) {
     match resolve(profile, default, None) {
         Err(detail) => (
-            ProbeResult { installed: false, detail: Some(detail), hint: Some(install_hint.to_string()), ..ProbeResult::default() },
+            ProbeResult {
+                installed: false,
+                detail: Some(detail),
+                hint: Some(install_hint.to_string()),
+                ..ProbeResult::default()
+            },
             None,
         ),
         Ok(program) => {
@@ -302,7 +308,11 @@ impl Collected {
     pub fn deny(&mut self, sink: &dyn EventSink, tool: &str, kind: &str, detail: &str) {
         self.flush(sink);
         let action = DeniedAction { tool: tool.to_string(), kind: kind.to_string(), detail: detail.to_string() };
-        sink.emit(EventBody::PermissionDenied { tool: action.tool.clone(), kind: action.kind.clone(), detail: action.detail.clone() });
+        sink.emit(EventBody::PermissionDenied {
+            tool: action.tool.clone(),
+            kind: action.kind.clone(),
+            detail: action.detail.clone(),
+        });
         if !self.denied.contains(&action) {
             self.denied.push(action);
         }
@@ -324,7 +334,14 @@ impl Collected {
     }
 
     /// Turns what was gathered, and how the process ended, into the adapter's outcome.
-    pub fn outcome(mut self, sink: &dyn EventSink, ended: StreamResult, req: &RunRequest, resumable: bool, login_hint: &str) -> RunOutcome {
+    pub fn outcome(
+        mut self,
+        sink: &dyn EventSink,
+        ended: StreamResult,
+        req: &RunRequest,
+        resumable: bool,
+        login_hint: &str,
+    ) -> RunOutcome {
         if let Some(text) = self.pending.take() {
             sink.emit(EventBody::message(text, true));
         }
@@ -370,7 +387,8 @@ impl Collected {
                     None => "the agent was terminated by a signal".to_string(),
                 },
             };
-            let auth = self.auth_required || looks_like_auth_error(&detail) || looks_like_auth_error(&ended.stderr_tail);
+            let auth =
+                self.auth_required || looks_like_auth_error(&detail) || looks_like_auth_error(&ended.stderr_tail);
             if auth {
                 fail(&mut out, reason::AUTH_REQUIRED, format!("{detail} ({login_hint})"));
             } else if looks_like_rate_limit(&detail) || looks_like_rate_limit(&ended.stderr_tail) {
@@ -382,14 +400,22 @@ impl Collected {
             return out;
         }
         if out.final_message.as_deref().map(str::trim).unwrap_or("").is_empty() {
-            fail(&mut out, reason::EMPTY_OUTPUT, "the agent exited with code 0 but produced no final message".to_string());
+            fail(
+                &mut out,
+                reason::EMPTY_OUTPUT,
+                "the agent exited with code 0 but produced no final message".to_string(),
+            );
             return out;
         }
         if req.output_schema.is_some() {
             let structured = self.structured.take().or_else(|| out.final_message.as_deref().and_then(extract_json));
             match structured {
                 Some(v) => out.structured_output = Some(v),
-                None => fail(&mut out, reason::INVALID_OUTPUT, "the final answer is not JSON, but the task asked for structured output".to_string()),
+                None => fail(
+                    &mut out,
+                    reason::INVALID_OUTPUT,
+                    "the final answer is not JSON, but the task asked for structured output".to_string(),
+                ),
             }
         }
         out
@@ -426,7 +452,9 @@ pub fn text_of(content: &Value) -> String {
             .iter()
             .filter_map(|b| match b {
                 Value::String(s) => Some(s.as_str()),
-                _ if b.get("type").and_then(Value::as_str).map(|t| t == "text").unwrap_or(true) => b.get("text").and_then(Value::as_str),
+                _ if b.get("type").and_then(Value::as_str).map(|t| t == "text").unwrap_or(true) => {
+                    b.get("text").and_then(Value::as_str)
+                }
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -531,7 +559,11 @@ mod tests {
     #[test]
     fn auth_failures_are_classified() {
         let sink = Memory::default();
-        let ended = StreamResult { exit_code: Some(1), stderr_tail: "Error: authentication required".into(), ..StreamResult::default() };
+        let ended = StreamResult {
+            exit_code: Some(1),
+            stderr_tail: "Error: authentication required".into(),
+            ..StreamResult::default()
+        };
         let out = Collected::default().outcome(&sink, ended, &request(Tier::ReadOnly), false, "run `x login`");
         assert_eq!(out.reason.as_deref(), Some(reason::AUTH_REQUIRED));
         assert!(out.detail.unwrap().contains("x login"));

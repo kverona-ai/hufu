@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use hufu_contract::proc;
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, Profile, ProbeResult, RawStream,
-    RunOutcome, RunRequest, StructuredOutput, reason,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
+    RawStream, RunOutcome, RunRequest, StructuredOutput, reason,
 };
 use serde_json::{Value, json};
 
@@ -46,7 +46,8 @@ fn ask<T: serde::de::DeserializeOwned>(profile: &Profile, verb: &str) -> Result<
     cmd.args(&program.prefix).arg(verb);
     let input = json!({"v": 1, "profile": profile_json(profile)}).to_string();
     let out = run_with_input(cmd, &input, Duration::from_secs(20))?;
-    serde_json::from_str(out.trim()).map_err(|e| format!("`{} {verb}` did not print the expected JSON: {e}", program.path.display()))
+    serde_json::from_str(out.trim())
+        .map_err(|e| format!("`{} {verb}` did not print the expected JSON: {e}", program.path.display()))
 }
 
 fn run_with_input(mut cmd: std::process::Command, input: &str, timeout: Duration) -> Result<String, String> {
@@ -87,7 +88,10 @@ impl Adapter for External {
 
     fn probe(&self, profile: &Profile) -> ProbeResult {
         if profile.command.is_empty() {
-            return ProbeResult { detail: Some("an external profile needs `command`, the adapter program".into()), ..ProbeResult::default() };
+            return ProbeResult {
+                detail: Some("an external profile needs `command`, the adapter program".into()),
+                ..ProbeResult::default()
+            };
         }
         match ask::<ProbeResult>(profile, "probe") {
             Ok(p) => p,
@@ -114,12 +118,18 @@ impl Adapter for External {
 
     fn plan(&self, profile: &Profile, req: &RunRequest) -> Result<LaunchPlan, AdapterError> {
         if profile.command.is_empty() {
-            return Err(AdapterError(format!("profile `{}`: adapter `external` needs `command`, the adapter program", profile.name)));
+            return Err(AdapterError(format!(
+                "profile `{}`: adapter `external` needs `command`, the adapter program",
+                profile.name
+            )));
         }
         // The program declares what it can do; a request beyond that never reaches it.
         let caps = self.capabilities(profile);
         if !caps.supports_tier(req.permission) {
-            return Err(AdapterError(format!("profile `{}`: the adapter program does not offer the `{}` tier", profile.name, req.permission)));
+            return Err(AdapterError(format!(
+                "profile `{}`: the adapter program does not offer the `{}` tier",
+                profile.name, req.permission
+            )));
         }
         let effort_ok = match &req.effort {
             Effort::Default => true,
@@ -127,10 +137,16 @@ impl Adapter for External {
             level => caps.efforts.contains(level),
         };
         if !effort_ok {
-            return Err(AdapterError(format!("profile `{}`: the adapter program has no mapping for effort `{}`", profile.name, req.effort)));
+            return Err(AdapterError(format!(
+                "profile `{}`: the adapter program has no mapping for effort `{}`",
+                profile.name, req.effort
+            )));
         }
         if req.resume_session.is_some() && !caps.resume {
-            return Err(AdapterError(format!("profile `{}`: the adapter program cannot resume a session", profile.name)));
+            return Err(AdapterError(format!(
+                "profile `{}`: the adapter program cannot resume a session",
+                profile.name
+            )));
         }
         let mut plan = common::plan_start(profile, &[]);
         plan.args.push("run".into());
@@ -160,7 +176,9 @@ impl Adapter for External {
             if stream != RawStream::Stdout {
                 return;
             }
-            let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                return;
+            };
             if v.get("type").and_then(Value::as_str) == Some("outcome") {
                 outcome = serde_json::from_value(v).ok();
             } else if let Ok(event) = serde_json::from_value::<EventBody>(v) {
@@ -178,8 +196,13 @@ impl Adapter for External {
         match outcome {
             Some(mut out) => {
                 // Success without an answer is not success, whatever the program says.
-                if out.status == hufu_contract::RunStatus::Succeeded && out.final_message.as_deref().unwrap_or("").trim().is_empty() {
-                    out = RunOutcome::failed(reason::EMPTY_OUTPUT, "the adapter reported success without a final message");
+                if out.status == hufu_contract::RunStatus::Succeeded
+                    && out.final_message.as_deref().unwrap_or("").trim().is_empty()
+                {
+                    out = RunOutcome::failed(
+                        reason::EMPTY_OUTPUT,
+                        "the adapter reported success without a final message",
+                    );
                 }
                 out.exit_code = ended.exit_code;
                 out

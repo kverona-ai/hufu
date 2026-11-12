@@ -49,7 +49,9 @@ fn run_one(check: &Check, ev: &Evidence) -> CheckOutcome {
         let mut cmd = proc::shell_command(line);
         cmd.current_dir(ev.workspace);
         match proc::run_capture(cmd, limit) {
-            Ok(out) if out.timed_out => ("command", line.clone(), false, format!("timed out after {}s", limit.as_secs())),
+            Ok(out) if out.timed_out => {
+                ("command", line.clone(), false, format!("timed out after {}s", limit.as_secs()))
+            }
             Ok(out) if out.ok() => ("command", line.clone(), true, String::new()),
             Ok(out) => {
                 let text = if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr };
@@ -76,7 +78,9 @@ fn run_one(check: &Check, ev: &Evidence) -> CheckOutcome {
         };
         match (schema, ev.structured_output) {
             (Err(e), _) => ("schema", "structured output".into(), false, e),
-            (Ok(_), None) => ("schema", "structured output".into(), false, "the job produced no structured output".into()),
+            (Ok(_), None) => {
+                ("schema", "structured output".into(), false, "the job produced no structured output".into())
+            }
             (Ok(schema), Some(value)) => {
                 let errors = schema::validate(&schema, value);
                 ("schema", "structured output".into(), errors.is_empty(), errors.join("; "))
@@ -91,7 +95,13 @@ fn run_one(check: &Check, ev: &Evidence) -> CheckOutcome {
     } else {
         ("unknown", String::new(), true, String::new())
     };
-    CheckOutcome { check: kind.to_string(), description, passed, detail, duration_ms: started.elapsed().as_millis() as u64 }
+    CheckOutcome {
+        check: kind.to_string(),
+        description,
+        passed,
+        detail,
+        duration_ms: started.elapsed().as_millis() as u64,
+    }
 }
 
 #[cfg(test)]
@@ -106,13 +116,21 @@ mod tests {
         let changed = vec!["src/auth/refresh.ts".to_string(), "package.json".to_string()];
         let output = json!({"ok": true});
         let denied = vec![DeniedAction { tool: "rm".into(), kind: "execute".into(), detail: String::new() }];
-        let ev = Evidence { workspace: &tmp, changed_files: &changed, structured_output: Some(&output), denied_actions: &denied };
+        let ev = Evidence {
+            workspace: &tmp,
+            changed_files: &changed,
+            structured_output: Some(&output),
+            denied_actions: &denied,
+        };
         let checks = vec![
             Check { command: Some("exit 0".into()), ..Check::default() },
             Check { command: Some("echo broken && exit 7".into()), ..Check::default() },
             Check { paths: Some(PathRules { allow: vec!["src/auth/**".into()], deny: vec![] }), ..Check::default() },
             Check { paths: Some(PathRules { allow: vec![], deny: vec!["**/*.lock".into()] }), ..Check::default() },
-            Check { schema: Some(SchemaRef::Inline(json!({"type": "object", "required": ["ok"]}))), ..Check::default() },
+            Check {
+                schema: Some(SchemaRef::Inline(json!({"type": "object", "required": ["ok"]}))),
+                ..Check::default()
+            },
             Check { schema: Some(SchemaRef::Inline(json!({"type": "array"}))), ..Check::default() },
             Check { no_denied_actions: Some(true), ..Check::default() },
         ];

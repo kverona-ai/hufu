@@ -103,7 +103,8 @@ pub fn doctor(home: &Home, loaded: &Loaded, adapters: &dyn AdapterRegistry, vers
     profiles.sort_by(|a, b| a.name.cmp(&b.name));
 
     let cu = &config.capabilities.computer_use;
-    let capable: Vec<String> = config.profiles.iter().filter(|(_, p)| p.provides.contains_key(COMPUTER_USE)).map(|(n, _)| n.clone()).collect();
+    let capable: Vec<String> =
+        config.profiles.iter().filter(|(_, p)| p.provides.contains_key(COMPUTER_USE)).map(|(n, _)| n.clone()).collect();
     let (ready, detail) = match (&cu.agent, capable.is_empty()) {
         (Some(agent), _) => {
             let installed = profiles.iter().find(|p| &p.name == agent).map(|p| p.installed).unwrap_or(false);
@@ -122,7 +123,9 @@ pub fn doctor(home: &Home, loaded: &Loaded, adapters: &dyn AdapterRegistry, vers
     let jobs = store::list_jobs(home);
     let mut hints = Vec::new();
     if !loaded.global_path.exists() && loaded.project_path.is_none() {
-        hints.push("no configuration file yet: run `hufu init` to write one from the agents found on this machine".into());
+        hints.push(
+            "no configuration file yet: run `hufu init` to write one from the agents found on this machine".into(),
+        );
     }
     if !profiles.iter().any(|p| p.installed) {
         hints.push("no supported agent is installed. Install at least one (Codex, Antigravity, Cursor, Claude Code, Kimi Code or pi), then run `hufu init`".into());
@@ -132,7 +135,11 @@ pub fn doctor(home: &Home, loaded: &Loaded, adapters: &dyn AdapterRegistry, vers
     }
     for p in profiles.iter().filter(|p| !p.builtin || !p.roles.is_empty()) {
         if !p.installed {
-            hints.push(format!("profile `{}`: the agent is not installed. {}", p.name, p.hint.clone().unwrap_or_default()));
+            hints.push(format!(
+                "profile `{}`: the agent is not installed. {}",
+                p.name,
+                p.hint.clone().unwrap_or_default()
+            ));
         } else if p.authenticated == Some(false) {
             hints.push(format!("profile `{}`: not logged in. {}", p.name, p.hint.clone().unwrap_or_default()));
         }
@@ -144,12 +151,22 @@ pub fn doctor(home: &Home, loaded: &Loaded, adapters: &dyn AdapterRegistry, vers
         version: version.to_string(),
         exe: submit::hufu_exe().map(|p| p.display().to_string()).unwrap_or_default(),
         home: home.root.display().to_string(),
-        config_files: std::iter::once(&loaded.global_path).chain(loaded.project_path.iter()).filter(|p| p.exists()).map(|p| p.display().to_string()).collect(),
+        config_files: std::iter::once(&loaded.global_path)
+            .chain(loaded.project_path.iter())
+            .filter(|p| p.exists())
+            .map(|p| p.display().to_string())
+            .collect(),
         problems: config.problems(adapters),
         advisor: config.roles.advisor.clone(),
         executors: config.roles.executors.clone(),
         profiles,
-        computer_use: ComputerUseCheck { route: format!("{:?}", cu.route).to_lowercase(), agent: cu.agent.clone(), capable, ready, detail },
+        computer_use: ComputerUseCheck {
+            route: format!("{:?}", cu.route).to_lowercase(),
+            agent: cu.agent.clone(),
+            capable,
+            ready,
+            detail,
+        },
         daemon: submit::daemon_info(home),
         running_jobs: jobs.iter().filter(|j| matches!(j.state, State::Running | State::Starting)).count(),
         queued_jobs: jobs.iter().filter(|j| j.state == State::Queued).count(),
@@ -195,7 +212,13 @@ pub fn self_test(adapters: &dyn AdapterRegistry) -> Vec<SelfTest> {
     let ctx = Context { home: &home, config: &loaded.config, adapters };
     let opts = Options { base_dir: work.clone(), ..Options::default() };
     let submit_task = |agent: &str, prompt: &str, tier: Tier| {
-        let task = TaskSpec { prompt: prompt.into(), agent: agent.into(), permission: Some(tier), timeout: Some("60s".into()), ..TaskSpec::default() };
+        let task = TaskSpec {
+            prompt: prompt.into(),
+            agent: agent.into(),
+            permission: Some(tier),
+            timeout: Some("60s".into()),
+            ..TaskSpec::default()
+        };
         submit::submit(&ctx, &task, &opts)
     };
     let limit = Some(Duration::from_secs(45));
@@ -205,7 +228,10 @@ pub fn self_test(adapters: &dyn AdapterRegistry) -> Vec<SelfTest> {
         let state = runner::wait(&home, &job.id, limit)?;
         let result = runner::result_of(&home, &job.id)?;
         let message = result.and_then(|r| r.final_message).unwrap_or_default();
-        Ok((state.state == State::Succeeded && message.contains("fake codex ok"), format!("state {}, final message `{message}`", state.state.as_str())))
+        Ok((
+            state.state == State::Succeeded && message.contains("fake codex ok"),
+            format!("state {}, final message `{message}`", state.state.as_str()),
+        ))
     });
     out.push(match check {
         Ok((ok, detail)) => SelfTest { name: "run a job in the background and read its result", ok, detail },
@@ -218,7 +244,10 @@ pub fn self_test(adapters: &dyn AdapterRegistry) -> Vec<SelfTest> {
         let result = runner::result_of(&home, &job.id)?;
         let denied = result.map(|r| r.denied_actions.len()).unwrap_or(0);
         let written = work.join("fake-output.txt").exists();
-        Ok((state.state == State::Succeeded && written && denied == 1, format!("state {}, file written: {written}, denied actions: {denied}", state.state.as_str())))
+        Ok((
+            state.state == State::Succeeded && written && denied == 1,
+            format!("state {}, file written: {written}, denied actions: {denied}", state.state.as_str()),
+        ))
     });
     out.push(match check {
         Ok((ok, detail)) => SelfTest { name: "enforce workspace-write over ACP", ok, detail },
@@ -228,14 +257,19 @@ pub fn self_test(adapters: &dyn AdapterRegistry) -> Vec<SelfTest> {
     // 3. Cancelling stops a hanging agent.
     let check = submit_task("selftest-cli", "self-test [[fake:hang]]", Tier::ReadOnly).and_then(|job| {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(20) && store::load_state(&home, &job.id).map(|s| s.agent_pid.is_none()).unwrap_or(true) {
+        while started.elapsed() < Duration::from_secs(20)
+            && store::load_state(&home, &job.id).map(|s| s.agent_pid.is_none()).unwrap_or(true)
+        {
             std::thread::sleep(Duration::from_millis(50));
         }
         let pid = store::load_state(&home, &job.id)?.agent_pid;
         runner::cancel(&home, &job.id)?;
         let state = runner::wait(&home, &job.id, limit)?;
         let gone = pid.map(|p| !proc::pid_alive(p)).unwrap_or(false);
-        Ok((state.state == State::Cancelled && gone, format!("state {}, agent process gone: {gone}", state.state.as_str())))
+        Ok((
+            state.state == State::Cancelled && gone,
+            format!("state {}, agent process gone: {gone}", state.state.as_str()),
+        ))
     });
     out.push(match check {
         Ok((ok, detail)) => SelfTest { name: "cancel a hanging agent and leave no process behind", ok, detail },
@@ -245,7 +279,11 @@ pub fn self_test(adapters: &dyn AdapterRegistry) -> Vec<SelfTest> {
     if out.iter().all(|t| t.ok) {
         let _ = std::fs::remove_dir_all(&root);
     } else {
-        out.push(SelfTest { name: "keep the evidence", ok: true, detail: format!("the throwaway home was left at {} for inspection", root.display()) });
+        out.push(SelfTest {
+            name: "keep the evidence",
+            ok: true,
+            detail: format!("the throwaway home was left at {} for inspection", root.display()),
+        });
     }
     out
 }

@@ -28,7 +28,8 @@ pub struct Ran {
 
 impl Ran {
     pub fn json(&self) -> Value {
-        serde_json::from_str(self.stdout.trim()).unwrap_or_else(|e| panic!("not JSON ({e}):\nstdout: {}\nstderr: {}", self.stdout, self.stderr))
+        serde_json::from_str(self.stdout.trim())
+            .unwrap_or_else(|e| panic!("not JSON ({e}):\nstdout: {}\nstderr: {}", self.stdout, self.stderr))
     }
 
     #[track_caller]
@@ -39,7 +40,11 @@ impl Ran {
 }
 
 fn ran(out: Output) -> Ran {
-    Ran { code: out.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&out.stdout).into_owned(), stderr: String::from_utf8_lossy(&out.stderr).into_owned() }
+    Ran {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
 }
 
 /// The argv that starts a fake agent of the given flavor.
@@ -120,7 +125,14 @@ impl Env {
     }
 
     pub fn with_stdin(&self, args: &[&str], input: &str) -> Ran {
-        let mut child = self.command(&self.work).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("hufu starts");
+        let mut child = self
+            .command(&self.work)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("hufu starts");
         child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
         ran(child.wait_with_output().unwrap())
     }
@@ -167,7 +179,18 @@ impl Env {
         for args in [
             vec!["init", "-q", "-b", "main"],
             vec!["add", "-A"],
-            vec!["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"],
+            vec![
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                "init",
+            ],
         ] {
             let out = Command::new("git").args(&args).current_dir(&self.work).output().expect("git is installed");
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));

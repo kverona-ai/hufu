@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use hufu_contract::proc::{self, Step, Streamed};
 use hufu_contract::{
     Adapter, AdapterError, CancelToken, Capabilities, Effort, EffortFallback, EventBody, EventSink, LaunchPlan,
-    PermissionRequests, Profile, ProbeResult, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
+    PermissionRequests, ProbeResult, Profile, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
     json::instruct_json, reason,
 };
 use serde_json::{Value, json};
@@ -64,7 +64,9 @@ impl Adapter for Acp {
 
     fn capabilities(&self, profile: &Profile) -> Capabilities {
         let verified = profile.permission_requests == PermissionRequests::Verified;
-        let mut notes = vec!["model and effort are matched against the options the agent advertises when the session opens".to_string()];
+        let mut notes = vec![
+            "model and effort are matched against the options the agent advertises when the session opens".to_string(),
+        ];
         if !verified {
             notes.push(
                 "only full-access is offered: set `permission_requests: verified` once you have checked that this agent asks before it edits or runs commands".into(),
@@ -113,11 +115,15 @@ impl Adapter for Acp {
         };
         let cmd = match common::command_from_plan(profile, &[], req, &plan) {
             Ok(c) => c,
-            Err(e) => return RunOutcome::failed(reason::AGENT_UNAVAILABLE, format!("could not start the agent: {e}")),
+            Err(e) => {
+                return RunOutcome::failed(reason::AGENT_UNAVAILABLE, format!("could not start the agent: {e}"));
+            }
         };
         let proc = match Streamed::spawn(cmd, None, true, sink) {
             Ok(p) => p,
-            Err(e) => return RunOutcome::failed(reason::AGENT_UNAVAILABLE, format!("could not start the agent: {e}")),
+            Err(e) => {
+                return RunOutcome::failed(reason::AGENT_UNAVAILABLE, format!("could not start the agent: {e}"));
+            }
         };
         let mut client = Client {
             proc,
@@ -195,7 +201,9 @@ impl Client<'_> {
                     None => {
                         self.cancel_sent_at = Some(Instant::now());
                         if let Some(sid) = self.session_id.clone() {
-                            self.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}}));
+                            self.send(
+                                &json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": sid}}),
+                            );
                         }
                     }
                     Some(at) if at.elapsed() >= proc::kill_grace() => return Err(Rpc::Cancelled),
@@ -228,7 +236,9 @@ impl Client<'_> {
                 let reply = self.agent_request(method, &params);
                 let body = match reply {
                     Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                    Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+                    Err((code, message)) => {
+                        json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+                    }
                 };
                 self.send(&body);
                 None
@@ -286,7 +296,12 @@ impl Client<'_> {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|o| Some((o.get("optionId")?.as_str()?.to_string(), o.get("kind").and_then(Value::as_str).unwrap_or("").to_string())))
+            .filter_map(|o| {
+                Some((
+                    o.get("optionId")?.as_str()?.to_string(),
+                    o.get("kind").and_then(Value::as_str).unwrap_or("").to_string(),
+                ))
+            })
             .collect();
         let pick = |wanted: &str| options.iter().find(|(_, k)| k == wanted).map(|(id, _)| id.clone());
 
@@ -363,9 +378,17 @@ impl Client<'_> {
                 self.flush_text();
                 let id = text("toolCallId").unwrap_or("tool").to_string();
                 let known = self.tools.get(&id).cloned();
-                let kind = text("kind").map(str::to_string).or_else(|| known.as_ref().map(|k| k.0.clone())).unwrap_or_else(|| "other".into());
-                let title = text("title").map(str::to_string).or_else(|| known.map(|k| k.1)).unwrap_or_else(|| kind.clone());
-                let status = text("status").unwrap_or(if text("sessionUpdate") == Some("tool_call") { "pending" } else { "in_progress" });
+                let kind = text("kind")
+                    .map(str::to_string)
+                    .or_else(|| known.as_ref().map(|k| k.0.clone()))
+                    .unwrap_or_else(|| "other".into());
+                let title =
+                    text("title").map(str::to_string).or_else(|| known.map(|k| k.1)).unwrap_or_else(|| kind.clone());
+                let status = text("status").unwrap_or(if text("sessionUpdate") == Some("tool_call") {
+                    "pending"
+                } else {
+                    "in_progress"
+                });
                 self.tools.insert(id.clone(), (kind.clone(), title.clone()));
                 self.c.tool(self.sink, &id, &kind, &title, status);
                 if status == "completed" && matches!(kind.as_str(), "edit" | "delete" | "move") {
@@ -376,7 +399,8 @@ impl Client<'_> {
             }
             "plan" => {
                 self.flush_text();
-                self.sink.emit(EventBody::Plan { entries: u.get("entries").cloned().unwrap_or(Value::Array(Vec::new())) });
+                self.sink
+                    .emit(EventBody::Plan { entries: u.get("entries").cloned().unwrap_or(Value::Array(Vec::new())) });
             }
             "usage_update" => {
                 self.c.usage = Usage {
@@ -408,7 +432,10 @@ impl Client<'_> {
         };
         let version = init.get("protocolVersion").and_then(Value::as_u64).unwrap_or(1);
         if version != 1 {
-            return fail(reason::PROTOCOL_ERROR, format!("the agent speaks ACP protocol version {version}; Hufu supports version 1"));
+            return fail(
+                reason::PROTOCOL_ERROR,
+                format!("the agent speaks ACP protocol version {version}; Hufu supports version 1"),
+            );
         }
         let caps = init.get("agentCapabilities").cloned().unwrap_or(Value::Null);
         let methods: Vec<(String, bool)> = init
@@ -416,7 +443,9 @@ impl Client<'_> {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|m| Some((m.get("id")?.as_str()?.to_string(), m.get("type").and_then(Value::as_str) == Some("terminal"))))
+            .filter_map(|m| {
+                Some((m.get("id")?.as_str()?.to_string(), m.get("type").and_then(Value::as_str) == Some("terminal")))
+            })
             .collect();
 
         // A profile that names an auth method wants it called up front (Cursor's documented flow).
@@ -431,7 +460,8 @@ impl Client<'_> {
             .mcp_servers
             .iter()
             .map(|s| {
-                let command = proc::which(&s.command).map(|p| p.display().to_string()).unwrap_or_else(|| s.command.clone());
+                let command =
+                    proc::which(&s.command).map(|p| p.display().to_string()).unwrap_or_else(|| s.command.clone());
                 let env: Vec<Value> = s.env.iter().map(|(k, v)| json!({"name": k, "value": v})).collect();
                 json!({"name": s.name, "command": command, "args": s.args, "env": env})
             })
@@ -446,7 +476,10 @@ impl Client<'_> {
                 }
                 Some(id) => {
                     let params = json!({"sessionId": id, "cwd": cwd, "mcpServers": servers});
-                    let can_resume = caps.pointer("/sessionCapabilities/resume").map(|v| !v.is_null() && v != &Value::Bool(false)).unwrap_or(false);
+                    let can_resume = caps
+                        .pointer("/sessionCapabilities/resume")
+                        .map(|v| !v.is_null() && v != &Value::Bool(false))
+                        .unwrap_or(false);
                     let can_load = caps.get("loadSession").and_then(Value::as_bool).unwrap_or(false);
                     if can_resume {
                         let r = me.call("session/resume", params, Some(HANDSHAKE))?;
@@ -457,7 +490,10 @@ impl Client<'_> {
                         me.replaying = false;
                         Ok((id.clone(), r?))
                     } else {
-                        Err(Rpc::Error { code: -32601, message: "the agent can neither resume nor load sessions".into() })
+                        Err(Rpc::Error {
+                            code: -32601,
+                            message: "the agent can neither resume nor load sessions".into(),
+                        })
                     }
                 }
             }
@@ -467,10 +503,12 @@ impl Client<'_> {
                 // Not logged in. Try the agent's stored login once through a non-interactive
                 // method; Hufu never performs an interactive login.
                 match methods.iter().find(|(_, terminal)| !terminal) {
-                    Some((method, _)) => match self.call("authenticate", json!({"methodId": method}), Some(HANDSHAKE)) {
-                        Ok(_) => open(self),
-                        Err(e) => return self.rpc_failure("authenticate", e),
-                    },
+                    Some((method, _)) => {
+                        match self.call("authenticate", json!({"methodId": method}), Some(HANDSHAKE)) {
+                            Ok(_) => open(self),
+                            Err(e) => return self.rpc_failure("authenticate", e),
+                        }
+                    }
                     None => Err(Rpc::Error { code: -32000, message: "authentication required".into() }),
                 }
             }
@@ -488,7 +526,13 @@ impl Client<'_> {
 
         let options = opened.get("configOptions").cloned().unwrap_or(Value::Null);
         if let Some(model) = self.req.model.clone() {
-            if let Err(e) = self.set_option(&session_id, &options, "model", &[model.clone()], &format!("model `{model}`")) {
+            if let Err(e) = self.set_option(
+                &session_id,
+                &options,
+                "model",
+                std::slice::from_ref(&model),
+                &format!("model `{model}`"),
+            ) {
                 return e;
             }
         }
@@ -505,7 +549,11 @@ impl Client<'_> {
             Some(schema) => instruct_json(&self.req.prompt, schema),
             None => self.req.prompt.clone(),
         };
-        match self.call("session/prompt", json!({"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}), None) {
+        match self.call(
+            "session/prompt",
+            json!({"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}),
+            None,
+        ) {
             Ok(r) => End::Stop(r.get("stopReason").and_then(Value::as_str).unwrap_or("end_turn").to_string()),
             Err(e) => self.rpc_failure("session/prompt", e),
         }
@@ -516,39 +564,61 @@ impl Client<'_> {
             Rpc::Cancelled => End::Stop("cancelled".into()),
             Rpc::Timeout => End::Fail(reason::PROTOCOL_ERROR, format!("the agent did not answer `{method}` in time")),
             Rpc::Closed => End::Fail(reason::PROTOCOL_ERROR, format!("the agent exited before answering `{method}`")),
-            Rpc::Error { code: -32000, message } => End::Fail(reason::AUTH_REQUIRED, format!("{message} (log in with the agent's own login command first)")),
-            Rpc::Error { code, message } if common::looks_like_auth_error(&message) => {
-                End::Fail(reason::AUTH_REQUIRED, format!("{message} (code {code}; log in with the agent's own login command first)"))
+            Rpc::Error { code: -32000, message } => {
+                End::Fail(reason::AUTH_REQUIRED, format!("{message} (log in with the agent's own login command first)"))
             }
+            Rpc::Error { code, message } if common::looks_like_auth_error(&message) => End::Fail(
+                reason::AUTH_REQUIRED,
+                format!("{message} (code {code}; log in with the agent's own login command first)"),
+            ),
             Rpc::Error { code, message } if common::looks_like_rate_limit(&message) => {
                 self.c.retryable = true;
                 End::Fail(reason::RATE_LIMITED, format!("`{method}` failed: {message} (code {code})"))
             }
-            Rpc::Error { code, message } => End::Fail(reason::AGENT_ERROR, format!("`{method}` failed: {message} (code {code})")),
+            Rpc::Error { code, message } => {
+                End::Fail(reason::AGENT_ERROR, format!("`{method}` failed: {message} (code {code})"))
+            }
         }
     }
 
     /// Sets the config option of `category` to the first of `wanted` the agent offers.
-    fn set_option(&mut self, session: &str, options: &Value, category: &str, wanted: &[String], what: &str) -> Result<String, End> {
-        let option = options
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|o| o.get("category").and_then(Value::as_str) == Some(category) || o.get("id").and_then(Value::as_str) == Some(category));
+    fn set_option(
+        &mut self,
+        session: &str,
+        options: &Value,
+        category: &str,
+        wanted: &[String],
+        what: &str,
+    ) -> Result<String, End> {
+        let option = options.as_array().into_iter().flatten().find(|o| {
+            o.get("category").and_then(Value::as_str) == Some(category)
+                || o.get("id").and_then(Value::as_str) == Some(category)
+        });
         let Some(option) = option else {
             return Err(End::Fail(
                 reason::UNSUPPORTED,
-                format!("the agent advertises no `{category}` option, so {what} cannot be honoured; leave it unset for this profile"),
+                format!(
+                    "the agent advertises no `{category}` option, so {what} cannot be honoured; leave it unset for this profile"
+                ),
             ));
         };
         let values = option_values(option);
-        let hit = wanted.iter().find_map(|w| values.iter().find(|(value, name)| value.eq_ignore_ascii_case(w) || name.eq_ignore_ascii_case(w)));
+        let hit = wanted.iter().find_map(|w| {
+            values.iter().find(|(value, name)| value.eq_ignore_ascii_case(w) || name.eq_ignore_ascii_case(w))
+        });
         let Some((value, _)) = hit else {
             let offered = values.iter().map(|(v, _)| v.as_str()).collect::<Vec<_>>().join(", ");
-            return Err(End::Fail(reason::UNSUPPORTED, format!("the agent does not offer {what}; it accepts: {offered}")));
+            return Err(End::Fail(
+                reason::UNSUPPORTED,
+                format!("the agent does not offer {what}; it accepts: {offered}"),
+            ));
         };
         let config_id = option.get("id").and_then(Value::as_str).unwrap_or(category).to_string();
-        match self.call("session/set_config_option", json!({"sessionId": session, "configId": config_id, "value": value}), Some(HANDSHAKE)) {
+        match self.call(
+            "session/set_config_option",
+            json!({"sessionId": session, "configId": config_id, "value": value}),
+            Some(HANDSHAKE),
+        ) {
             Ok(_) => Ok(value.clone()),
             Err(e) => Err(self.rpc_failure("session/set_config_option", e)),
         }
@@ -567,13 +637,17 @@ impl Client<'_> {
         let what = format!("effort `{wanted}`");
         match self.set_option(session, options, "thought_level", &aliases(&wanted), &what) {
             Ok(_) => Ok(()),
-            Err(End::Fail(why, detail)) if why == reason::UNSUPPORTED && self.profile.effort_fallback == EffortFallback::Nearest => {
+            Err(End::Fail(why, detail))
+                if why == reason::UNSUPPORTED && self.profile.effort_fallback == EffortFallback::Nearest =>
+            {
                 let mut order: Vec<Effort> = Effort::SCALE.to_vec();
                 let rank = wanted.rank().unwrap_or(2);
                 order.sort_by_key(|e| ((e.rank().unwrap_or(0) - rank).abs(), e.rank()));
                 for candidate in order.into_iter().filter(|e| *e != wanted) {
                     if self.set_option(session, options, "thought_level", &aliases(&candidate), &what).is_ok() {
-                        self.sink.emit(EventBody::warning(format!("effort `{wanted}` is not offered by the agent; using nearest level `{candidate}`")));
+                        self.sink.emit(EventBody::warning(format!(
+                            "effort `{wanted}` is not offered by the agent; using nearest level `{candidate}`"
+                        )));
                         return Ok(());
                     }
                 }
@@ -601,7 +675,9 @@ impl Client<'_> {
                 return;
             }
             if self.call("session/set_mode", json!({"sessionId": session, "modeId": mode}), Some(HANDSHAKE)).is_err() {
-                self.sink.emit(EventBody::warning(format!("could not switch the agent to its `{mode}` mode; relying on permission answers")));
+                self.sink.emit(EventBody::warning(format!(
+                    "could not switch the agent to its `{mode}` mode; relying on permission answers"
+                )));
             }
         }
     }
@@ -653,7 +729,11 @@ impl Client<'_> {
                 let mut out = self.c.outcome(self.sink, ended, self.req, true, login_hint);
                 out.status = hufu_contract::RunStatus::Failed;
                 out.reason = Some(why.to_string());
-                out.detail = Some(if stderr.is_empty() || why == reason::UNSUPPORTED { detail } else { format!("{detail}\n{stderr}") });
+                out.detail = Some(if stderr.is_empty() || why == reason::UNSUPPORTED {
+                    detail
+                } else {
+                    format!("{detail}\n{stderr}")
+                });
                 out.retryable = retryable;
                 out.structured_output = None;
                 out
@@ -761,17 +841,23 @@ pub(crate) fn decide(tier: Tier, profile: &Profile, workspace: &Path, kind: &str
         }
         "execute" => {
             let Some(command) = command_text(call) else {
-                return (false, "the command text was not given, so it cannot be matched against `allow_execute`".into());
+                return (
+                    false,
+                    "the command text was not given, so it cannot be matched against `allow_execute`".into(),
+                );
             };
             let trimmed = command.trim();
             // A prefix only vouches for one command, so anything that chains or redirects is refused.
             let chained = ["&&", "||", ";", "|", "`", "$(", ">", "<", "\n"].iter().any(|op| trimmed.contains(op));
             let hit = profile.allow_execute.iter().filter(|p| p.as_str() != "fetch").find(|p| {
-                trimmed == p.as_str() || trimmed.strip_prefix(p.as_str()).map(|rest| rest.starts_with(' ')).unwrap_or(false)
+                trimmed == p.as_str()
+                    || trimmed.strip_prefix(p.as_str()).map(|rest| rest.starts_with(' ')).unwrap_or(false)
             });
             match (hit, chained) {
                 (Some(prefix), false) => (true, format!("matches `allow_execute` entry `{prefix}`")),
-                (Some(_), true) => (false, "the command chains or redirects, which `allow_execute` prefixes do not cover".into()),
+                (Some(_), true) => {
+                    (false, "the command chains or redirects, which `allow_execute` prefixes do not cover".into())
+                }
                 (None, _) => (false, "the command is not in the profile's `allow_execute` list".into()),
             }
         }

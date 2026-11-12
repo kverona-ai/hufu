@@ -43,9 +43,9 @@ impl Tier {
             "read-only" | "readonly" | "ro" => Ok(Tier::ReadOnly),
             "workspace-write" | "write" | "ww" => Ok(Tier::WorkspaceWrite),
             "full-access" | "full" => Ok(Tier::FullAccess),
-            other => Err(format!(
-                "unknown permission tier `{other}`; accepted: read-only, workspace-write, full-access"
-            )),
+            other => {
+                Err(format!("unknown permission tier `{other}`; accepted: read-only, workspace-write, full-access"))
+            }
         }
     }
 }
@@ -420,8 +420,7 @@ impl Usage {
 
     /// Total tokens, computed from the parts when the agent gives no total.
     pub fn tokens(&self) -> u64 {
-        self.total_tokens
-            .unwrap_or_else(|| self.input_tokens.unwrap_or(0) + self.output_tokens.unwrap_or(0))
+        self.total_tokens.unwrap_or_else(|| self.input_tokens.unwrap_or(0) + self.output_tokens.unwrap_or(0))
     }
 
     /// Adds another usage record to this one.
@@ -610,13 +609,7 @@ pub trait Adapter: Send + Sync {
     fn plan(&self, profile: &Profile, req: &RunRequest) -> Result<LaunchPlan, AdapterError>;
 
     /// Runs one prompt to completion, emitting events as it goes.
-    fn run(
-        &self,
-        profile: &Profile,
-        req: &RunRequest,
-        sink: &dyn EventSink,
-        cancel: &CancelToken,
-    ) -> RunOutcome;
+    fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome;
 }
 
 /// Looks up adapters by kind. The binary wires the real registry in; tests can supply their own.

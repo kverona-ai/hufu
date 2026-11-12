@@ -5,7 +5,7 @@
 //! restricting pi to its `read` tool with `--tools`.
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, Profile, ProbeResult,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
     RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage, json::instruct_json,
 };
 use serde_json::Value;
@@ -14,7 +14,8 @@ use crate::common::{self, Collected};
 
 const DEFAULT: &[&str] = &["pi"];
 const INSTALL: &str = "install pi: `curl -fsSL https://pi.dev/install.sh | sh` (Windows: `powershell -c \"irm https://pi.dev/install.ps1 | iex\"`), or `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` with Node.js 22.19 or newer";
-const FORBIDDEN: &[&str] = &["--tools", "-t", "--exclude-tools", "-xt", "--no-tools", "-nt", "--no-builtin-tools", "-nbt", "--approve", "-a"];
+const FORBIDDEN: &[&str] =
+    &["--tools", "-t", "--exclude-tools", "-xt", "--no-tools", "-nt", "--no-builtin-tools", "-nbt", "--approve", "-a"];
 
 pub struct Pi;
 
@@ -75,7 +76,9 @@ impl Adapter for Pi {
             return probe;
         };
         let Some(var) = provider_key_var(provider) else {
-            probe.detail = Some(format!("provider `{provider}`: key variable not known to Hufu; make sure the profile passes it through `env`"));
+            probe.detail = Some(format!(
+                "provider `{provider}`: key variable not known to Hufu; make sure the profile passes it through `env`"
+            ));
             return probe;
         };
         let source = profile.env_from.get(var).cloned();
@@ -91,7 +94,10 @@ impl Adapter for Pi {
                 probe.hint = Some(format!("add `env: [{var}]` to the profile"));
             }
             (_, false) => {
-                probe.detail = Some(format!("{} is not set in this shell; pi may still have a stored key", source.as_deref().unwrap_or(var)));
+                probe.detail = Some(format!(
+                    "{} is not set in this shell; pi may still have a stored key",
+                    source.as_deref().unwrap_or(var)
+                ));
                 probe.hint = Some(format!("export {} or run `pi` and use /login", source.as_deref().unwrap_or(var)));
             }
         }
@@ -197,7 +203,9 @@ fn add_usage(c: &mut Collected, u: &Value) {
 }
 
 fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     let text = |key: &str| v.get(key).and_then(Value::as_str).unwrap_or("");
     match text("type") {
         "session" => {
@@ -211,7 +219,11 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
             }
             if let Some(ev) = v.get("assistantMessageEvent") {
                 if ev.get("type").and_then(Value::as_str) == Some("error") {
-                    let msg = ev.get("error").map(common::title_of).filter(|m| !m.is_empty()).unwrap_or_else(|| "the model call failed".into());
+                    let msg = ev
+                        .get("error")
+                        .map(common::title_of)
+                        .filter(|m| !m.is_empty())
+                        .unwrap_or_else(|| "the model call failed".into());
                     s.c.fail(sink, &msg);
                 }
             }
@@ -258,7 +270,11 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
         "tool_execution_start" => {
             let name = text("toolName");
             let args = v.get("args").cloned().unwrap_or(Value::Null);
-            let target = args.get("command").or_else(|| args.get("path")).or_else(|| args.get("file_path")).map(common::title_of);
+            let target = args
+                .get("command")
+                .or_else(|| args.get("path"))
+                .or_else(|| args.get("file_path"))
+                .map(common::title_of);
             let title = match target {
                 Some(t) if !t.is_empty() => format!("{name}: {t}"),
                 _ => name.to_string(),
@@ -268,7 +284,13 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
         "tool_execution_end" => {
             let name = text("toolName");
             let failed = v.get("isError").and_then(Value::as_bool).unwrap_or(false);
-            s.c.tool(sink, text("toolCallId"), common::tool_kind(name), name, if failed { "failed" } else { "completed" });
+            s.c.tool(
+                sink,
+                text("toolCallId"),
+                common::tool_kind(name),
+                name,
+                if failed { "failed" } else { "completed" },
+            );
         }
         "auto_retry_end" => {
             if v.get("success").and_then(Value::as_bool) == Some(false) {
@@ -277,10 +299,8 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
                 s.c.retryable = true;
             }
         }
-        "agent_settled" => {
-            if v.get("aborted").and_then(Value::as_bool) == Some(true) && s.c.error.is_none() {
-                s.c.fail(sink, "pi aborted the run");
-            }
+        "agent_settled" if v.get("aborted").and_then(Value::as_bool) == Some(true) && s.c.error.is_none() => {
+            s.c.fail(sink, "pi aborted the run");
         }
         _ => {}
     }

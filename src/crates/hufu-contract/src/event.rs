@@ -145,7 +145,12 @@ mod tests {
 
     #[test]
     fn events_serialize_with_a_type_field() {
-        let e = Event { v: 1, seq: 42, ts: "2026-11-12T17:03:11.120Z".into(), body: EventBody::tool("c7", "edit", "src/a.rs", "completed") };
+        let e = Event {
+            v: 1,
+            seq: 42,
+            ts: "2026-11-12T17:03:11.120Z".into(),
+            body: EventBody::tool("c7", "edit", "src/a.rs", "completed"),
+        };
         let s = serde_json::to_string(&e).unwrap();
         assert!(s.contains("\"type\":\"tool.call\"") && s.contains("\"seq\":42"));
         let back: Event = serde_json::from_str(&s).unwrap();

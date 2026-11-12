@@ -103,31 +103,59 @@ fn json_file(host: &str, path: &Path, opts: &SetupOptions) -> SetupAction {
         Ok(text) => match serde_json::from_str(&text) {
             Ok(v) => v,
             Err(e) => {
-                return SetupAction { host: host.into(), action: "skipped", path: shown, detail: format!("the file is not plain JSON ({e}); add this by hand: {}", json!({"hufu": server_entry(&opts.exe)})) };
+                return SetupAction {
+                    host: host.into(),
+                    action: "skipped",
+                    path: shown,
+                    detail: format!(
+                        "the file is not plain JSON ({e}); add this by hand: {}",
+                        json!({"hufu": server_entry(&opts.exe)})
+                    ),
+                };
             }
         },
         Err(_) => json!({}),
     };
     if !doc.is_object() {
-        return SetupAction { host: host.into(), action: "skipped", path: shown, detail: "the file does not hold a JSON object".into() };
+        return SetupAction {
+            host: host.into(),
+            action: "skipped",
+            path: shown,
+            detail: "the file does not hold a JSON object".into(),
+        };
     }
     let entry = server_entry(&opts.exe);
     let current = doc.pointer("/mcpServers/hufu").cloned();
     if opts.remove {
         if current.is_none() {
-            return SetupAction { host: host.into(), action: "absent", path: shown, detail: "hufu was not registered".into() };
+            return SetupAction {
+                host: host.into(),
+                action: "absent",
+                path: shown,
+                detail: "hufu was not registered".into(),
+            };
         }
         if let Some(servers) = doc.get_mut("mcpServers").and_then(Value::as_object_mut) {
             servers.remove("hufu");
         }
     } else {
         if current.as_ref() == Some(&entry) {
-            return SetupAction { host: host.into(), action: "unchanged", path: shown, detail: "already registered".into() };
+            return SetupAction {
+                host: host.into(),
+                action: "unchanged",
+                path: shown,
+                detail: "already registered".into(),
+            };
         }
         let obj = doc.as_object_mut().expect("checked above");
         let servers = obj.entry("mcpServers").or_insert(json!({}));
         if !servers.is_object() {
-            return SetupAction { host: host.into(), action: "skipped", path: shown, detail: "`mcpServers` is not an object".into() };
+            return SetupAction {
+                host: host.into(),
+                action: "skipped",
+                path: shown,
+                detail: "`mcpServers` is not an object".into(),
+            };
         }
         servers.as_object_mut().expect("checked above").insert("hufu".into(), entry);
     }
@@ -140,7 +168,12 @@ fn json_file(host: &str, path: &Path, opts: &SetupOptions) -> SetupAction {
     }
     backup(path);
     match store::write_atomic(path, text.as_bytes()) {
-        Ok(()) => SetupAction { host: host.into(), action: if opts.remove { "removed" } else { "registered" }, path: shown, detail: "restart the agent to pick it up".into() },
+        Ok(()) => SetupAction {
+            host: host.into(),
+            action: if opts.remove { "removed" } else { "registered" },
+            path: shown,
+            detail: "restart the agent to pick it up".into(),
+        },
         Err(e) => SetupAction { host: host.into(), action: "failed", path: shown, detail: e.message },
     }
 }
@@ -157,14 +190,22 @@ fn codex_toml(path: &Path, opts: &SetupOptions) -> SetupAction {
     let host = "codex".to_string();
     let shown = Some(path.display().to_string());
     let text = std::fs::read_to_string(path).unwrap_or_default();
-    let block = format!("{BEGIN}\n[mcp_servers.hufu]\ncommand = {}\nargs = [\"mcp\"]\n{END}\n", toml_string(&opts.exe.display().to_string()));
+    let block = format!(
+        "{BEGIN}\n[mcp_servers.hufu]\ncommand = {}\nargs = [\"mcp\"]\n{END}\n",
+        toml_string(&opts.exe.display().to_string())
+    );
     let managed = text.find(BEGIN).and_then(|a| text[a..].find(END).map(|b| (a, a + b + END.len())));
     let outside = match managed {
         Some((a, b)) => format!("{}{}", &text[..a], text[b..].trim_start_matches('\n')),
         None => text.clone(),
     };
     if outside.lines().any(|l| l.trim().starts_with("[mcp_servers.hufu]")) {
-        return SetupAction { host, action: "skipped", path: shown, detail: "`[mcp_servers.hufu]` is already defined by hand; leaving it alone".into() };
+        return SetupAction {
+            host,
+            action: "skipped",
+            path: shown,
+            detail: "`[mcp_servers.hufu]` is already defined by hand; leaving it alone".into(),
+        };
     }
     let next = if opts.remove {
         if managed.is_none() {
@@ -189,7 +230,12 @@ fn codex_toml(path: &Path, opts: &SetupOptions) -> SetupAction {
     }
     backup(path);
     match store::write_atomic(path, next.as_bytes()) {
-        Ok(()) => SetupAction { host, action: if opts.remove { "removed" } else { "registered" }, path: shown, detail: "new Codex sessions will see the `hufu` tools".into() },
+        Ok(()) => SetupAction {
+            host,
+            action: if opts.remove { "removed" } else { "registered" },
+            path: shown,
+            detail: "new Codex sessions will see the `hufu` tools".into(),
+        },
         Err(e) => SetupAction { host, action: "failed", path: shown, detail: e.message },
     }
 }
@@ -204,7 +250,12 @@ fn claude(opts: &SetupOptions) -> Vec<SetupAction> {
     if let Some(project) = &opts.project {
         out.push(json_file("claude", &project.join(".mcp.json"), opts));
     } else if opts.print {
-        out.push(SetupAction { host: host.clone(), action: "manual", path: None, detail: format!("claude mcp add --scope user hufu -- {} mcp", opts.exe.display()) });
+        out.push(SetupAction {
+            host: host.clone(),
+            action: "manual",
+            path: None,
+            detail: format!("claude mcp add --scope user hufu -- {} mcp", opts.exe.display()),
+        });
     } else {
         // User scope lives in a file Claude Code owns; its own command is the supported way in.
         match proc::which("claude") {
@@ -212,7 +263,10 @@ fn claude(opts: &SetupOptions) -> Vec<SetupAction> {
                 host: host.clone(),
                 action: "manual",
                 path: None,
-                detail: format!("`claude` is not on PATH; once it is, run: claude mcp add --scope user hufu -- {} mcp", opts.exe.display()),
+                detail: format!(
+                    "`claude` is not on PATH; once it is, run: claude mcp add --scope user hufu -- {} mcp",
+                    opts.exe.display()
+                ),
             }),
             Some(program) => {
                 let run = |args: &[&str]| {
@@ -224,12 +278,39 @@ fn claude(opts: &SetupOptions) -> Vec<SetupAction> {
                 // Re-registering replaces an entry that points at an older location of the binary.
                 let _ = run(&["mcp", "remove", "--scope", "user", "hufu"]);
                 if opts.remove {
-                    out.push(SetupAction { host: host.clone(), action: "removed", path: None, detail: "ran `claude mcp remove --scope user hufu`".into() });
+                    out.push(SetupAction {
+                        host: host.clone(),
+                        action: "removed",
+                        path: None,
+                        detail: "ran `claude mcp remove --scope user hufu`".into(),
+                    });
                 } else {
                     match run(&["mcp", "add", "--scope", "user", "hufu", "--", &exe, "mcp"]) {
-                        Ok(done) if done.ok() => out.push(SetupAction { host: host.clone(), action: "registered", path: None, detail: "ran `claude mcp add --scope user hufu`; new sessions will see the `hufu` tools".into() }),
-                        Ok(done) => out.push(SetupAction { host: host.clone(), action: "failed", path: None, detail: format!("`claude mcp add` failed: {}", proc::tail(if done.stderr.trim().is_empty() { &done.stdout } else { &done.stderr }, 300)) }),
-                        Err(e) => out.push(SetupAction { host: host.clone(), action: "failed", path: None, detail: format!("`claude mcp add` could not be run: {e}") }),
+                        Ok(done) if done.ok() => out.push(SetupAction {
+                            host: host.clone(),
+                            action: "registered",
+                            path: None,
+                            detail: "ran `claude mcp add --scope user hufu`; new sessions will see the `hufu` tools"
+                                .into(),
+                        }),
+                        Ok(done) => out.push(SetupAction {
+                            host: host.clone(),
+                            action: "failed",
+                            path: None,
+                            detail: format!(
+                                "`claude mcp add` failed: {}",
+                                proc::tail(
+                                    if done.stderr.trim().is_empty() { &done.stdout } else { &done.stderr },
+                                    300
+                                )
+                            ),
+                        }),
+                        Err(e) => out.push(SetupAction {
+                            host: host.clone(),
+                            action: "failed",
+                            path: None,
+                            detail: format!("`claude mcp add` could not be run: {e}"),
+                        }),
                     }
                 }
             }
@@ -244,17 +325,38 @@ fn claude(opts: &SetupOptions) -> Vec<SetupAction> {
         let path = dir.join("skills").join("hufu").join("SKILL.md");
         let shown = Some(path.display().to_string());
         if opts.print {
-            out.push(SetupAction { host, action: "manual", path: shown, detail: "the Hufu skill would be written here".into() });
+            out.push(SetupAction {
+                host,
+                action: "manual",
+                path: shown,
+                detail: "the Hufu skill would be written here".into(),
+            });
         } else if opts.remove {
             let existed = path.exists();
             let _ = std::fs::remove_file(&path);
             let _ = std::fs::remove_dir(path.parent().unwrap_or(&dir));
-            out.push(SetupAction { host, action: if existed { "removed" } else { "absent" }, path: shown, detail: "the Hufu skill".into() });
+            out.push(SetupAction {
+                host,
+                action: if existed { "removed" } else { "absent" },
+                path: shown,
+                detail: "the Hufu skill".into(),
+            });
         } else if std::fs::read_to_string(&path).map(|t| t == CLAUDE_SKILL).unwrap_or(false) {
-            out.push(SetupAction { host, action: "unchanged", path: shown, detail: "the Hufu skill is up to date".into() });
+            out.push(SetupAction {
+                host,
+                action: "unchanged",
+                path: shown,
+                detail: "the Hufu skill is up to date".into(),
+            });
         } else {
-            let written = path.parent().map(std::fs::create_dir_all).transpose().is_ok() && store::write_atomic(&path, CLAUDE_SKILL.as_bytes()).is_ok();
-            out.push(SetupAction { host, action: if written { "registered" } else { "failed" }, path: shown, detail: "the Hufu skill, which tells Claude Code when to delegate".into() });
+            let written = path.parent().map(std::fs::create_dir_all).transpose().is_ok()
+                && store::write_atomic(&path, CLAUDE_SKILL.as_bytes()).is_ok();
+            out.push(SetupAction {
+                host,
+                action: if written { "registered" } else { "failed" },
+                path: shown,
+                detail: "the Hufu skill, which tells Claude Code when to delegate".into(),
+            });
         }
     }
     out
@@ -268,7 +370,12 @@ pub fn setup(hosts: &[String], opts: &SetupOptions) -> Vec<SetupAction> {
             "claude" => out.extend(claude(opts)),
             "codex" => match host_dir("codex") {
                 Some(dir) => out.push(codex_toml(&dir.join("config.toml"), opts)),
-                None => out.push(SetupAction { host: host.clone(), action: "failed", path: None, detail: "cannot find the home directory".into() }),
+                None => out.push(SetupAction {
+                    host: host.clone(),
+                    action: "failed",
+                    path: None,
+                    detail: "cannot find the home directory".into(),
+                }),
             },
             "cursor" | "kimi" | "agy" => {
                 let file = if host == "agy" { "mcp_config.json" } else { "mcp.json" };
@@ -278,11 +385,26 @@ pub fn setup(hosts: &[String], opts: &SetupOptions) -> Vec<SetupAction> {
                 };
                 match path {
                     Some(path) => out.push(json_file(host, &path, opts)),
-                    None => out.push(SetupAction { host: host.clone(), action: "failed", path: None, detail: "cannot find the home directory".into() }),
+                    None => out.push(SetupAction {
+                        host: host.clone(),
+                        action: "failed",
+                        path: None,
+                        detail: "cannot find the home directory".into(),
+                    }),
                 }
             }
-            "generic" => out.push(SetupAction { host: host.clone(), action: "manual", path: None, detail: generic_snippet(&opts.exe) }),
-            other => out.push(SetupAction { host: other.to_string(), action: "failed", path: None, detail: format!("unknown host; accepted: {}, generic", HOSTS.join(", ")) }),
+            "generic" => out.push(SetupAction {
+                host: host.clone(),
+                action: "manual",
+                path: None,
+                detail: generic_snippet(&opts.exe),
+            }),
+            other => out.push(SetupAction {
+                host: other.to_string(),
+                action: "failed",
+                path: None,
+                detail: format!("unknown host; accepted: {}, generic", HOSTS.join(", ")),
+            }),
         }
     }
     out
@@ -307,7 +429,13 @@ pub struct InitReport {
 pub fn detect_agents(adapters: &dyn AdapterRegistry) -> Vec<String> {
     const ORDER: &[&str] = &["codex", "claude", "agy", "cursor", "kimi", "pi"];
     let presets = config::presets();
-    ORDER.iter().filter(|name| presets.get(**name).and_then(|p| adapters.get(&p.adapter).map(|a| a.probe(p).installed)).unwrap_or(false)).map(|s| s.to_string()).collect()
+    ORDER
+        .iter()
+        .filter(|name| {
+            presets.get(**name).and_then(|p| adapters.get(&p.adapter).map(|a| a.probe(p).installed)).unwrap_or(false)
+        })
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Writes a first `config.yaml` that names the agents found on this machine.
@@ -317,7 +445,13 @@ pub fn init(home: &Home, adapters: &dyn AdapterRegistry, force: bool) -> Result<
     let advisor = detected.first().cloned();
     let executors = detected.clone();
     if path.exists() && !force {
-        return Ok(InitReport { path: path.display().to_string(), action: "kept", detected, advisor: None, executors: Vec::new() });
+        return Ok(InitReport {
+            path: path.display().to_string(),
+            action: "kept",
+            detected,
+            advisor: None,
+            executors: Vec::new(),
+        });
     }
     let existed = path.exists();
     home.ensure()?;
@@ -358,7 +492,8 @@ pub fn init(home: &Home, adapters: &dyn AdapterRegistry, force: bool) -> Result<
          # capabilities:\n#   computer_use:\n#     route: dedicated          # dedicated | executor\n#     agent: <a profile that declares `provides: {computer_use: {via: native|lcu}}`>\n",
     );
     let raw = config::parse_yaml(&text).map_err(HufuError::internal)?;
-    config::check_raw(&raw, adapters).map_err(|p| HufuError::internal(format!("the generated configuration is invalid: {}", p.join("; "))))?;
+    config::check_raw(&raw, adapters)
+        .map_err(|p| HufuError::internal(format!("the generated configuration is invalid: {}", p.join("; "))))?;
     if existed {
         backup(&path);
     }
@@ -366,7 +501,13 @@ pub fn init(home: &Home, adapters: &dyn AdapterRegistry, force: bool) -> Result<
         std::fs::create_dir_all(parent).at(parent)?;
     }
     store::write_atomic(&path, text.as_bytes())?;
-    Ok(InitReport { path: path.display().to_string(), action: if existed { "replaced" } else { "created" }, detected, advisor, executors })
+    Ok(InitReport {
+        path: path.display().to_string(),
+        action: if existed { "replaced" } else { "created" },
+        detected,
+        advisor,
+        executors,
+    })
 }
 
 #[cfg(test)]
@@ -393,7 +534,11 @@ mod tests {
         assert_eq!(json_file("cursor", &path, &opts(true)).action, "removed");
         assert_eq!(json_file("cursor", &path, &opts(true)).action, "absent");
         std::fs::write(&path, "{ // comments\n}").unwrap();
-        assert_eq!(json_file("cursor", &path, &opts(false)).action, "skipped", "a file Hufu cannot parse is never overwritten");
+        assert_eq!(
+            json_file("cursor", &path, &opts(false)).action,
+            "skipped",
+            "a file Hufu cannot parse is never overwritten"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -406,7 +551,10 @@ mod tests {
         assert_eq!(codex_toml(&path, &opts(false)).action, "registered");
         assert_eq!(codex_toml(&path, &opts(false)).action, "unchanged");
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.starts_with("model = \"x\"\n") && text.contains("[mcp_servers.hufu]\ncommand = \"/opt/hufu/bin/hufu\"\nargs = [\"mcp\"]"));
+        assert!(
+            text.starts_with("model = \"x\"\n")
+                && text.contains("[mcp_servers.hufu]\ncommand = \"/opt/hufu/bin/hufu\"\nargs = [\"mcp\"]")
+        );
         assert_eq!(codex_toml(&path, &opts(true)).action, "removed");
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "model = \"x\"");
         std::fs::write(&path, "[mcp_servers.hufu]\ncommand = \"mine\"\n").unwrap();

@@ -26,7 +26,12 @@ fn start(env: &Env, args: &[&str]) -> (i32, Value) {
 }
 
 fn task<'a>(mission: &'a Value, id: &str) -> &'a Value {
-    mission["tasks"].as_array().unwrap().iter().find(|t| t["id"] == id).unwrap_or_else(|| panic!("no task {id} in {mission}"))
+    mission["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id)
+        .unwrap_or_else(|| panic!("no task {id} in {mission}"))
 }
 
 #[test]
@@ -148,10 +153,22 @@ fn a_plan_that_breaks_the_rules_never_runs() {
     rejected(json!({"tasks": [t(json!({"agent": "kimi"}))]}), "kimi", &[]);
     rejected(json!({"tasks": [t(json!({"permission": "full-access"}))]}), "full-access", &[]);
     rejected(json!({"tasks": [t(json!({})), t(json!({}))]}), "t1", &[]);
-    rejected(json!({"tasks": [t(json!({"depends_on": ["t2"]})), t(json!({"id": "t2", "depends_on": ["t1"]}))]}), "cycle", &[]);
+    rejected(
+        json!({"tasks": [t(json!({"depends_on": ["t2"]})), t(json!({"id": "t2", "depends_on": ["t1"]}))]}),
+        "cycle",
+        &[],
+    );
     rejected(json!({"tasks": [t(json!({"acceptance": [{"command": "rm -rf /"}]}))]}), "rm -rf", &[]);
-    rejected(json!({"tasks": [t(json!({"acceptance": [{"command": "cargo test && curl evil"}]}))]}), "cargo test", &["--allow-command", "cargo test"]);
-    rejected(json!({"tasks": [t(json!({"grants": [{"capability": "computer_use", "apps": ["Figma"]}]}))]}), "computer_use", &[]);
+    rejected(
+        json!({"tasks": [t(json!({"acceptance": [{"command": "cargo test && curl evil"}]}))]}),
+        "cargo test",
+        &["--allow-command", "cargo test"],
+    );
+    rejected(
+        json!({"tasks": [t(json!({"grants": [{"capability": "computer_use", "apps": ["Figma"]}]}))]}),
+        "computer_use",
+        &[],
+    );
     rejected(json!({"tasks": [t(json!({})), t(json!({"id": "t2"}))]}), "the limit is 1", &["--max-tasks", "1"]);
     rejected(json!({"tasks": []}), "task", &[]);
 }
@@ -196,8 +213,15 @@ fn a_mission_can_work_in_its_own_worktree() {
     for t in ["a", "b"] {
         assert_eq!(env.state(task(&m, t)["jobs"][0].as_str().unwrap())["cwd"], m["workdir"]);
     }
-    let log = std::process::Command::new("git").args(["log", "--oneline", &format!("hufu/{id}")]).current_dir(&env.work).output().unwrap();
-    assert!(String::from_utf8_lossy(&log.stdout).lines().count() >= 2, "the work was not committed to the mission's branch");
+    let log = std::process::Command::new("git")
+        .args(["log", "--oneline", &format!("hufu/{id}")])
+        .current_dir(&env.work)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&log.stdout).lines().count() >= 2,
+        "the work was not committed to the mission's branch"
+    );
 }
 
 #[test]
@@ -278,7 +302,11 @@ fn mission_requests_are_checked_before_anything_starts() {
     assert!(list["missions"].as_array().unwrap().is_empty());
 
     // A mission file gives the same settings as the flags.
-    std::fs::write(env.work.join("mission.yaml"), "version: 1\ngoal: From a file\nadvisor: agy\nexecutors: [cursor]\nreview: never\n").unwrap();
+    std::fs::write(
+        env.work.join("mission.yaml"),
+        "version: 1\ngoal: From a file\nadvisor: agy\nexecutors: [cursor]\nreview: never\n",
+    )
+    .unwrap();
     let (code, m) = start(&env, &["-f", "mission.yaml"]);
     assert_eq!(code, 0, "{m}");
     assert_eq!(m["advisor"], "agy");

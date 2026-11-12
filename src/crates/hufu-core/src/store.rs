@@ -22,7 +22,11 @@ pub const HEARTBEAT_EVERY: Duration = Duration::from_secs(5);
 
 /// `STALE_AFTER`, unless `HUFU_STALE_AFTER_MS` shortens it (tests do, so they need not wait).
 pub fn stale_after() -> Duration {
-    std::env::var("HUFU_STALE_AFTER_MS").ok().and_then(|v| v.parse().ok()).map(Duration::from_millis).unwrap_or(STALE_AFTER)
+    std::env::var("HUFU_STALE_AFTER_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(STALE_AFTER)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -392,7 +396,8 @@ pub fn resolve_job(home: &Home, partial: &str) -> Result<String> {
         return Ok(partial.to_string());
     }
     let with_prefix = if partial.starts_with("j_") { partial.to_string() } else { format!("j_{partial}") };
-    let hits: Vec<String> = job_ids(home).into_iter().filter(|id| id.starts_with(&with_prefix) || id.starts_with(partial)).collect();
+    let hits: Vec<String> =
+        job_ids(home).into_iter().filter(|id| id.starts_with(&with_prefix) || id.starts_with(partial)).collect();
     match hits.len() {
         1 => Ok(hits.into_iter().next().unwrap_or_default()),
         0 => Err(HufuError::usage(format!("no such job `{partial}`; list jobs with `hufu status --all`"))),
@@ -402,7 +407,9 @@ pub fn resolve_job(home: &Home, partial: &str) -> Result<String> {
 
 /// Reads the events with a sequence number greater than `after`.
 pub fn read_events(home: &Home, id: &str, after: u64) -> Vec<Event> {
-    let Ok(text) = std::fs::read_to_string(home.job(id).join("events.ndjson")) else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(home.job(id).join("events.ndjson")) else {
+        return Vec::new();
+    };
     text.lines().filter_map(|l| serde_json::from_str::<Event>(l).ok()).filter(|e| e.seq > after).collect()
 }
 
@@ -435,7 +442,9 @@ pub fn cancel_requested(home: &Home, id: &str) -> bool {
 /// Jobs that name `id` as their parent.
 pub fn children_of(home: &Home, id: &str) -> Vec<String> {
     let path = home.job(id).join("children.ndjson");
-    std::fs::read_to_string(path).map(|t| t.lines().map(str::to_string).filter(|l| !l.is_empty()).collect()).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .map(|t| t.lines().map(str::to_string).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default()
 }
 
 /// Records a child job under its parent, so that cancelling the parent reaches it.
@@ -463,7 +472,11 @@ mod tests {
         write_json(&path, &serde_json::json!({"a": 2})).unwrap();
         let back: Value = read_json(&path).unwrap();
         assert_eq!(back["a"], 2);
-        let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).collect();
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
         assert!(leftovers.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }

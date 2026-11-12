@@ -12,8 +12,15 @@ fn check(flavor: &str, tune: fn(&mut Profile)) {
     let registry = hufu_adapters::Registry::builtin();
     let kind = hufu_testing::adapter_of(flavor);
     let adapter = registry.get(kind).unwrap_or_else(|| panic!("no adapter `{kind}`"));
-    let subject = Subject { adapter, fake: vec![HUFU.to_string(), "__fake-agent".into(), flavor.to_string()], workspace: env.work.clone(), scratch, tune };
-    let failed: Vec<String> = run_all(&subject).into_iter().filter_map(|(id, r)| r.err().map(|e| format!("{id}: {e}"))).collect();
+    let subject = Subject {
+        adapter,
+        fake: vec![HUFU.to_string(), "__fake-agent".into(), flavor.to_string()],
+        workspace: env.work.clone(),
+        scratch,
+        tune,
+    };
+    let failed: Vec<String> =
+        run_all(&subject).into_iter().filter_map(|(id, r)| r.err().map(|e| format!("{id}: {e}"))).collect();
     assert!(failed.is_empty(), "adapter `{kind}` breaks the contract:\n{}", failed.join("\n"));
 }
 

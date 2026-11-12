@@ -75,7 +75,9 @@ pub struct Script {
 
 impl Script {
     fn new(flavor: &str, prompt: String, cwd: Option<String>, resumed: Option<String>, argv: &[String]) -> Script {
-        let chosen = directive(&prompt, "fake").or_else(|| std::env::var("HUFU_FAKE_SCENARIO").ok().filter(|s| !s.is_empty())).unwrap_or_else(|| "ok".into());
+        let chosen = directive(&prompt, "fake")
+            .or_else(|| std::env::var("HUFU_FAKE_SCENARIO").ok().filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| "ok".into());
         let (scenario, arg) = match chosen.split_once('=') {
             Some((s, a)) => (s.trim().to_string(), Some(a.trim().to_string())),
             None => (chosen.trim().to_string(), None),
@@ -97,12 +99,21 @@ impl Script {
             if let Some(plan) = directive(&self.prompt, "plan") {
                 return plan;
             }
-            let agent = self.prompt.lines().find_map(|l| l.trim().strip_prefix("- `").and_then(|r| r.split('`').next())).unwrap_or("codex").to_string();
+            let agent = self
+                .prompt
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("- `").and_then(|r| r.split('`').next()))
+                .unwrap_or("codex")
+                .to_string();
             return json!({"v": 1, "summary": "one step", "tasks": [{"id": "t1", "title": "Do the work", "prompt": "Carry out the goal.", "agent": agent}]}).to_string();
         }
         if self.prompt.contains(REVIEW_MARKER) {
             let wanted = directive(&self.prompt, "review").unwrap_or_else(|| "accept".into());
-            let round: u32 = self.prompt.lines().find_map(|l| l.trim().strip_prefix("Round: ").and_then(|r| r.trim().parse().ok())).unwrap_or(1);
+            let round: u32 = self
+                .prompt
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("Round: ").and_then(|r| r.trim().parse().ok()))
+                .unwrap_or(1);
             let verdict = match wanted.as_str() {
                 "revise-then-accept" => {
                     if round <= 1 {
@@ -171,7 +182,9 @@ fn perform(script: &Script, voice: &mut dyn Voice) -> i32 {
             voice.finish(None);
             return 0;
         }
-        "slow" => std::thread::sleep(Duration::from_millis(script.arg.as_deref().and_then(|a| a.parse().ok()).unwrap_or(1500))),
+        "slow" => std::thread::sleep(Duration::from_millis(
+            script.arg.as_deref().and_then(|a| a.parse().ok()).unwrap_or(1500),
+        )),
         _ => {}
     }
     voice.tool("t1", "read", "README.md", false);
@@ -207,10 +220,14 @@ impl Voice for Codex {
     }
     fn tool(&mut self, id: &str, kind: &str, title: &str, denied: bool) {
         if kind == "edit" {
-            emit(json!({"type": "item.completed", "item": {"id": id, "type": "file_change", "changes": [{"path": title, "kind": "add"}], "status": "completed"}}));
+            emit(
+                json!({"type": "item.completed", "item": {"id": id, "type": "file_change", "changes": [{"path": title, "kind": "add"}], "status": "completed"}}),
+            );
         } else {
             let status = if denied { "declined" } else { "completed" };
-            emit(json!({"type": "item.completed", "item": {"id": id, "type": "command_execution", "command": title, "aggregated_output": "", "exit_code": if denied { Value::Null } else { json!(0) }, "status": status}}));
+            emit(
+                json!({"type": "item.completed", "item": {"id": id, "type": "command_execution", "command": title, "aggregated_output": "", "exit_code": if denied { Value::Null } else { json!(0) }, "status": status}}),
+            );
         }
     }
     fn say(&mut self, text: &str) {
@@ -220,7 +237,9 @@ impl Voice for Codex {
         if let (Some(path), Some(text)) = (&self.last_message, text) {
             let _ = std::fs::write(path, text);
         }
-        emit(json!({"type": "turn.completed", "usage": {"input_tokens": 120, "cached_input_tokens": 20, "output_tokens": 30, "reasoning_output_tokens": 5}}));
+        emit(
+            json!({"type": "turn.completed", "usage": {"input_tokens": 120, "cached_input_tokens": 20, "output_tokens": 30, "reasoning_output_tokens": 5}}),
+        );
     }
     fn auth_error(&mut self) -> i32 {
         emit(json!({"type": "error", "message": "Not logged in. Run `codex login` first."}));
@@ -236,7 +255,9 @@ struct Agy {
 impl Voice for Agy {
     fn start(&mut self, session: &str) {
         self.session = session.to_string();
-        emit(json!({"event": "init", "conversation_id": session, "init": {"cwd": ".", "tools": ["run_command"], "permission_mode": "request-review"}}));
+        emit(
+            json!({"event": "init", "conversation_id": session, "init": {"cwd": ".", "tools": ["run_command"], "permission_mode": "request-review"}}),
+        );
     }
     fn tool(&mut self, _id: &str, kind: &str, title: &str, denied: bool) {
         self.step += 1;
@@ -249,19 +270,29 @@ impl Voice for Agy {
         if denied {
             info["error"] = json!({"type": "permission_denied", "message": "command was denied"});
         }
-        emit(json!({"event": "step_update", "step_update": {"step_index": self.step, "state": "DONE", "step_type": "tool", "tool_name": name, "tool_info": info}}));
+        emit(
+            json!({"event": "step_update", "step_update": {"step_index": self.step, "state": "DONE", "step_type": "tool", "tool_name": name, "tool_info": info}}),
+        );
     }
     fn say(&mut self, text: &str) {
         self.step += 1;
-        emit(json!({"event": "step_update", "step_update": {"step_index": self.step, "state": "ACTIVE", "step_type": "agent_response", "text_delta": text}}));
-        emit(json!({"event": "step_update", "step_update": {"step_index": self.step, "state": "DONE", "step_type": "agent_response"}}));
+        emit(
+            json!({"event": "step_update", "step_update": {"step_index": self.step, "state": "ACTIVE", "step_type": "agent_response", "text_delta": text}}),
+        );
+        emit(
+            json!({"event": "step_update", "step_update": {"step_index": self.step, "state": "DONE", "step_type": "agent_response"}}),
+        );
     }
     fn finish(&mut self, text: Option<&str>) {
-        emit(json!({"event": "result", "result": {"conversation_id": self.session, "status": "SUCCESS", "response": text.unwrap_or(""), "num_turns": 1,
-            "usage": {"input_tokens": 100, "output_tokens": 20, "thinking_tokens": 5, "cache_read_tokens": 0, "total_tokens": 125}}}));
+        emit(
+            json!({"event": "result", "result": {"conversation_id": self.session, "status": "SUCCESS", "response": text.unwrap_or(""), "num_turns": 1,
+            "usage": {"input_tokens": 100, "output_tokens": 20, "thinking_tokens": 5, "cache_read_tokens": 0, "total_tokens": 125}}}),
+        );
     }
     fn auth_error(&mut self) -> i32 {
-        emit(json!({"event": "result", "result": {"conversation_id": "", "status": "ERROR", "response": "", "error": "authentication required: please sign in"}}));
+        emit(
+            json!({"event": "result", "result": {"conversation_id": "", "status": "ERROR", "response": "", "error": "authentication required: please sign in"}}),
+        );
         1
     }
 }
@@ -272,21 +303,35 @@ struct Cursor {
 impl Voice for Cursor {
     fn start(&mut self, session: &str) {
         self.session = session.to_string();
-        emit(json!({"type": "system", "subtype": "init", "apiKeySource": "login", "cwd": ".", "session_id": session, "model": "fake", "permissionMode": "default"}));
+        emit(
+            json!({"type": "system", "subtype": "init", "apiKeySource": "login", "cwd": ".", "session_id": session, "model": "fake", "permissionMode": "default"}),
+        );
     }
     fn tool(&mut self, id: &str, kind: &str, title: &str, denied: bool) {
         let call = match (kind, denied) {
-            ("edit", _) => json!({"writeToolCall": {"args": {"path": title, "fileText": "x"}, "result": {"success": {"path": title, "linesCreated": 1, "fileSize": 1}}}}),
-            (_, true) => json!({"function": {"name": "shell", "arguments": json!({"command": title}).to_string(), "result": {"rejected": {"reason": "not in allowlist"}}}}),
-            _ => json!({"readToolCall": {"args": {"path": title}, "result": {"success": {"content": "x"}}}}),
+            ("edit", _) => {
+                json!({"writeToolCall": {"args": {"path": title, "fileText": "x"}, "result": {"success": {"path": title, "linesCreated": 1, "fileSize": 1}}}})
+            }
+            (_, true) => {
+                json!({"function": {"name": "shell", "arguments": json!({"command": title}).to_string(), "result": {"rejected": {"reason": "not in allowlist"}}}})
+            }
+            _ => {
+                json!({"readToolCall": {"args": {"path": title}, "result": {"success": {"content": "x"}}}})
+            }
         };
-        emit(json!({"type": "tool_call", "subtype": "completed", "call_id": id, "tool_call": call, "session_id": self.session}));
+        emit(
+            json!({"type": "tool_call", "subtype": "completed", "call_id": id, "tool_call": call, "session_id": self.session}),
+        );
     }
     fn say(&mut self, text: &str) {
-        emit(json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}, "session_id": self.session}));
+        emit(
+            json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}, "session_id": self.session}),
+        );
     }
     fn finish(&mut self, text: Option<&str>) {
-        emit(json!({"type": "result", "subtype": "success", "duration_ms": 10, "is_error": false, "result": text.unwrap_or(""), "session_id": self.session}));
+        emit(
+            json!({"type": "result", "subtype": "success", "duration_ms": 10, "is_error": false, "result": text.unwrap_or(""), "session_id": self.session}),
+        );
     }
     fn auth_error(&mut self) -> i32 {
         eprintln!("Error: Not logged in. Please run `agent login`.");
@@ -298,7 +343,9 @@ struct Kimi;
 impl Voice for Kimi {
     fn start(&mut self, _session: &str) {}
     fn tool(&mut self, id: &str, _kind: &str, title: &str, denied: bool) {
-        emit(json!({"role": "assistant", "content": "", "tool_calls": [{"type": "function", "id": id, "function": {"name": "Shell", "arguments": json!({"command": title}).to_string()}}]}));
+        emit(
+            json!({"role": "assistant", "content": "", "tool_calls": [{"type": "function", "id": id, "function": {"name": "Shell", "arguments": json!({"command": title}).to_string()}}]}),
+        );
         let result = if denied { "Error: permission denied by user" } else { "ok" };
         emit(json!({"role": "tool", "tool_call_id": id, "content": result}));
     }
@@ -315,7 +362,9 @@ impl Voice for Kimi {
 struct Pi;
 impl Voice for Pi {
     fn start(&mut self, session: &str) {
-        emit(json!({"type": "session", "version": 3, "id": session, "timestamp": "2026-01-01T00:00:00.000Z", "cwd": "."}));
+        emit(
+            json!({"type": "session", "version": 3, "id": session, "timestamp": "2026-01-01T00:00:00.000Z", "cwd": "."}),
+        );
         emit(json!({"type": "agent_start"}));
     }
     fn tool(&mut self, id: &str, kind: &str, title: &str, denied: bool) {
@@ -324,20 +373,30 @@ impl Voice for Pi {
             "execute" => "bash",
             _ => "read",
         };
-        emit(json!({"type": "tool_execution_start", "toolCallId": id, "toolName": name, "args": {"command": title, "path": title}}));
+        emit(
+            json!({"type": "tool_execution_start", "toolCallId": id, "toolName": name, "args": {"command": title, "path": title}}),
+        );
         let text = if denied { "permission denied: blocked by policy" } else { "ok" };
-        emit(json!({"type": "tool_execution_end", "toolCallId": id, "toolName": name, "result": {"content": [{"type": "text", "text": text}]}, "isError": denied, "durationMs": 1}));
+        emit(
+            json!({"type": "tool_execution_end", "toolCallId": id, "toolName": name, "result": {"content": [{"type": "text", "text": text}]}, "isError": denied, "durationMs": 1}),
+        );
     }
     fn say(&mut self, text: &str) {
-        emit(json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": text},
-            "usage": {"input": 100, "output": 20, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 120, "cost": {"total": 0.01}}}));
-        emit(json!({"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": text}], "stopReason": "stop"}}));
+        emit(
+            json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": text},
+            "usage": {"input": 100, "output": 20, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 120, "cost": {"total": 0.01}}}),
+        );
+        emit(
+            json!({"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": text}], "stopReason": "stop"}}),
+        );
     }
     fn finish(&mut self, _text: Option<&str>) {
         emit(json!({"type": "agent_settled", "aborted": false}));
     }
     fn auth_error(&mut self) -> i32 {
-        eprintln!("Error: No API key found for provider. Authentication required: use /login or set the provider's API key.");
+        eprintln!(
+            "Error: No API key found for provider. Authentication required: use /login or set the provider's API key."
+        );
         1
     }
 }
@@ -349,7 +408,9 @@ struct Claude {
 impl Voice for Claude {
     fn start(&mut self, session: &str) {
         self.session = session.to_string();
-        emit(json!({"type": "system", "subtype": "init", "session_id": session, "model": "fake", "tools": ["Read", "Edit", "Bash"]}));
+        emit(
+            json!({"type": "system", "subtype": "init", "session_id": session, "model": "fake", "tools": ["Read", "Edit", "Bash"]}),
+        );
     }
     fn tool(&mut self, id: &str, kind: &str, title: &str, denied: bool) {
         let (name, input) = match kind {
@@ -357,21 +418,31 @@ impl Voice for Claude {
             "execute" => ("Bash", json!({"command": title})),
             _ => ("Read", json!({"file_path": title})),
         };
-        emit(json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}, "session_id": self.session}));
-        emit(json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "is_error": denied}]}, "session_id": self.session}));
+        emit(
+            json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}, "session_id": self.session}),
+        );
+        emit(
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "is_error": denied}]}, "session_id": self.session}),
+        );
         if denied {
             self.denied.push(json!({"tool_name": name, "tool_use_id": id, "tool_input": input}));
         }
     }
     fn say(&mut self, text: &str) {
-        emit(json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}, "session_id": self.session}));
+        emit(
+            json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}, "session_id": self.session}),
+        );
     }
     fn finish(&mut self, text: Option<&str>) {
-        emit(json!({"type": "result", "subtype": "success", "is_error": false, "result": text.unwrap_or(""), "session_id": self.session, "total_cost_usd": 0.02,
-            "usage": {"input_tokens": 50, "output_tokens": 70, "cache_read_input_tokens": 3}, "permission_denials": self.denied}));
+        emit(
+            json!({"type": "result", "subtype": "success", "is_error": false, "result": text.unwrap_or(""), "session_id": self.session, "total_cost_usd": 0.02,
+            "usage": {"input_tokens": 50, "output_tokens": 70, "cache_read_input_tokens": 3}, "permission_denials": self.denied}),
+        );
     }
     fn auth_error(&mut self) -> i32 {
-        emit(json!({"type": "result", "subtype": "success", "is_error": true, "result": "Not logged in · Please run /login", "session_id": "s"}));
+        emit(
+            json!({"type": "result", "subtype": "success", "is_error": true, "result": "Not logged in · Please run /login", "session_id": "s"}),
+        );
         1
     }
 }
@@ -387,7 +458,9 @@ impl Voice for External {
         self.session = session.to_string();
     }
     fn tool(&mut self, id: &str, kind: &str, title: &str, denied: bool) {
-        emit(json!({"type": "tool.call", "id": id, "kind": kind, "title": title, "status": if denied { "failed" } else { "completed" }}));
+        emit(
+            json!({"type": "tool.call", "id": id, "kind": kind, "title": title, "status": if denied { "failed" } else { "completed" }}),
+        );
         if denied {
             emit(json!({"type": "permission.denied", "tool": title, "kind": kind}));
             self.denied.push(json!({"tool": title, "kind": kind}));
@@ -400,11 +473,15 @@ impl Voice for External {
     }
     fn finish(&mut self, text: Option<&str>) {
         let structured = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
-        emit(json!({"type": "outcome", "status": "succeeded", "final_message": text, "structured_output": structured, "denied_actions": self.denied,
-            "session": {"id": self.session, "resumable": true}, "usage": {"input_tokens": 10, "output_tokens": 5}, "touched_paths": self.touched}));
+        emit(
+            json!({"type": "outcome", "status": "succeeded", "final_message": text, "structured_output": structured, "denied_actions": self.denied,
+            "session": {"id": self.session, "resumable": true}, "usage": {"input_tokens": 10, "output_tokens": 5}, "touched_paths": self.touched}),
+        );
     }
     fn auth_error(&mut self) -> i32 {
-        emit(json!({"type": "outcome", "status": "failed", "reason": "auth_required", "detail": "not logged in (run the agent's login command)"}));
+        emit(
+            json!({"type": "outcome", "status": "failed", "reason": "auth_required", "detail": "not logged in (run the agent's login command)"}),
+        );
         0
     }
 }
@@ -417,8 +494,10 @@ fn external(args: &[String]) -> i32 {
             0
         }
         Some("capabilities") => {
-            emit(json!({"permission_tiers": ["read-only", "workspace-write", "full-access"], "efforts": ["low", "high"], "native_effort": false, "checked_at_runtime": false,
-                "models": [], "resume": true, "structured_output": "instructed", "reports_usage": true, "reports_denials": true, "accepts_mcp_servers": false, "provides": [], "notes": []}));
+            emit(
+                json!({"permission_tiers": ["read-only", "workspace-write", "full-access"], "efforts": ["low", "high"], "native_effort": false, "checked_at_runtime": false,
+                "models": [], "resume": true, "structured_output": "instructed", "reports_usage": true, "reports_denials": true, "accepts_mcp_servers": false, "provides": [], "notes": []}),
+            );
             0
         }
         Some("run") => {
@@ -447,9 +526,13 @@ fn acp(argv: &[String]) -> i32 {
     let mut resumed: Option<String> = None;
     let mut next_id = 1000u64;
     let reply = |id: &Value, result: Value| emit(json!({"jsonrpc": "2.0", "id": id, "result": result}));
-    let update = |session: &str, u: Value| emit(json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session, "update": u}}));
+    let update = |session: &str, u: Value| {
+        emit(json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session, "update": u}}))
+    };
     while let Some(Ok(line)) = lines.next() {
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let params = msg.get("params").cloned().unwrap_or(Value::Null);
         match msg.get("method").and_then(Value::as_str).unwrap_or("") {
@@ -462,7 +545,9 @@ fn acp(argv: &[String]) -> i32 {
             "session/new" | "session/load" | "session/resume" => {
                 cwd = params["cwd"].as_str().map(str::to_string);
                 if std::env::var("HUFU_FAKE_SCENARIO").as_deref() == Ok("auth") {
-                    emit(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "Authentication required"}}));
+                    emit(
+                        json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "Authentication required"}}),
+                    );
                     continue;
                 }
                 let session = params["sessionId"].as_str().map(str::to_string);
@@ -480,7 +565,13 @@ fn acp(argv: &[String]) -> i32 {
             "session/set_config_option" | "session/set_mode" => reply(&id, json!({})),
             "session/prompt" => {
                 let session = params["sessionId"].as_str().unwrap_or("fake-acp-session").to_string();
-                let prompt: String = params["prompt"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n");
+                let prompt: String = params["prompt"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|b| b["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let script = Script::new("acp", prompt, cwd.clone(), resumed.clone(), argv);
                 match script.scenario.as_str() {
                     "hang" | "silent" => {
@@ -505,26 +596,40 @@ fn acp(argv: &[String]) -> i32 {
                         continue;
                     }
                     "rate-limit" => {
-                        emit(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": "429 Too Many Requests: rate limit exceeded"}}));
+                        emit(
+                            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": "429 Too Many Requests: rate limit exceeded"}}),
+                        );
                         continue;
                     }
                     "refuse" => {
                         reply(&id, json!({"stopReason": "refusal"}));
                         continue;
                     }
-                    "slow" => std::thread::sleep(Duration::from_millis(script.arg.as_deref().and_then(|a| a.parse().ok()).unwrap_or(1500))),
+                    "slow" => std::thread::sleep(Duration::from_millis(
+                        script.arg.as_deref().and_then(|a| a.parse().ok()).unwrap_or(1500),
+                    )),
                     _ => {}
                 }
-                update(&session, json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}}));
-                update(&session, json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "README.md", "kind": "read", "status": "completed"}));
+                update(
+                    &session,
+                    json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}}),
+                );
+                update(
+                    &session,
+                    json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "README.md", "kind": "read", "status": "completed"}),
+                );
                 // Ask before acting, the way a real agent does: once for an edit, once for a command.
                 let mut ask = |call: Value, lines: &mut std::io::Lines<std::io::StdinLock<'_>>| -> bool {
                     next_id += 1;
-                    emit(json!({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission", "params": {"sessionId": session, "toolCall": call,
-                        "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}, {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}}));
+                    emit(
+                        json!({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission", "params": {"sessionId": session, "toolCall": call,
+                        "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}, {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}}),
+                    );
                     for line in lines.by_ref() {
                         let Ok(line) = line else { return false };
-                        let Ok(answer) = serde_json::from_str::<Value>(&line) else { continue };
+                        let Ok(answer) = serde_json::from_str::<Value>(&line) else {
+                            continue;
+                        };
                         if answer["id"].as_u64() == Some(next_id) {
                             return answer["result"]["outcome"]["optionId"].as_str() == Some("yes");
                         }
@@ -535,32 +640,59 @@ fn acp(argv: &[String]) -> i32 {
                     let name = script.arg.clone().unwrap_or_else(|| "fake-output.txt".into());
                     let path = script.cwd.join(&name);
                     let call = json!({"toolCallId": "t2", "title": format!("Write {name}"), "kind": "edit", "status": "pending", "locations": [{"path": path}]});
-                    update(&session, json!({"sessionUpdate": "tool_call", "toolCallId": "t2", "title": format!("Write {name}"), "kind": "edit", "status": "pending", "locations": [{"path": path}]}));
+                    update(
+                        &session,
+                        json!({"sessionUpdate": "tool_call", "toolCallId": "t2", "title": format!("Write {name}"), "kind": "edit", "status": "pending", "locations": [{"path": path}]}),
+                    );
                     if ask(call, &mut lines) {
                         let _ = std::fs::write(&path, "written by fake acp\n");
-                        update(&session, json!({"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "completed", "locations": [{"path": path}]}));
+                        update(
+                            &session,
+                            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "completed", "locations": [{"path": path}]}),
+                        );
                     } else {
-                        update(&session, json!({"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "failed"}));
+                        update(
+                            &session,
+                            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "failed"}),
+                        );
                     }
                 }
                 if matches!(script.scenario.as_str(), "deny" | "permission") {
                     let call = json!({"toolCallId": "t3", "title": "npm test", "kind": "execute", "status": "pending", "rawInput": {"command": "npm test"}});
-                    update(&session, json!({"sessionUpdate": "tool_call", "toolCallId": "t3", "title": "npm test", "kind": "execute", "status": "pending", "rawInput": {"command": "npm test"}}));
+                    update(
+                        &session,
+                        json!({"sessionUpdate": "tool_call", "toolCallId": "t3", "title": "npm test", "kind": "execute", "status": "pending", "rawInput": {"command": "npm test"}}),
+                    );
                     let allowed = ask(call, &mut lines);
-                    update(&session, json!({"sessionUpdate": "tool_call_update", "toolCallId": "t3", "status": if allowed { "completed" } else { "failed" }}));
+                    update(
+                        &session,
+                        json!({"sessionUpdate": "tool_call_update", "toolCallId": "t3", "status": if allowed { "completed" } else { "failed" }}),
+                    );
                 }
                 let text = script.answer();
-                let (a, b) = text.split_at(text.char_indices().nth(text.chars().count() / 2).map(|(i, _)| i).unwrap_or(0));
-                update(&session, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": a}}));
-                update(&session, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": b}}));
-                update(&session, json!({"sessionUpdate": "usage_update", "used": 321, "size": 100000, "cost": {"amount": 0.03, "currency": "USD"}}));
+                let (a, b) =
+                    text.split_at(text.char_indices().nth(text.chars().count() / 2).map(|(i, _)| i).unwrap_or(0));
+                update(
+                    &session,
+                    json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": a}}),
+                );
+                update(
+                    &session,
+                    json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": b}}),
+                );
+                update(
+                    &session,
+                    json!({"sessionUpdate": "usage_update", "used": 321, "size": 100000, "cost": {"amount": 0.03, "currency": "USD"}}),
+                );
                 reply(&id, json!({"stopReason": "end_turn"}));
             }
             "session/cancel" => {}
             "" => {}
             other => {
                 if !id.is_null() {
-                    emit(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("method not found: {other}")}}));
+                    emit(
+                        json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("method not found: {other}")}}),
+                    );
                 }
             }
         }
@@ -605,7 +737,9 @@ pub fn fake_agent_main(args: &[String]) -> i32 {
             perform(&script, &mut Codex { last_message: flag(rest, &["-o", "--output-last-message"]) })
         }
         "agy" => {
-            let Some(prompt) = flag(rest, &["-p"]) else { return 0 };
+            let Some(prompt) = flag(rest, &["-p"]) else {
+                return 0;
+            };
             let script = Script::new("agy", prompt, None, flag(rest, &["--conversation"]), rest);
             perform(&script, &mut Agy { session: String::new(), step: 0 })
         }
@@ -619,7 +753,9 @@ pub fn fake_agent_main(args: &[String]) -> i32 {
             perform(&script, &mut Cursor { session: String::new() })
         }
         "kimi" => {
-            let Some(prompt) = flag(rest, &["-p"]) else { return 0 };
+            let Some(prompt) = flag(rest, &["-p"]) else {
+                return 0;
+            };
             let script = Script::new("kimi", prompt, None, None, rest);
             perform(&script, &mut Kimi)
         }
@@ -673,9 +809,17 @@ mod tests {
         assert_eq!(directive("nothing here", "fake"), None);
         let s = Script::new("codex", "hello [[fake:reply=custom text]]".into(), None, None, &[]);
         assert_eq!((s.scenario.as_str(), s.answer().as_str()), ("reply", "custom text"));
-        let plan = Script::new("codex", format!("<!-- {PLAN_MARKER} -->\n- `worker` does things\n"), None, None, &[]).answer();
+        let plan =
+            Script::new("codex", format!("<!-- {PLAN_MARKER} -->\n- `worker` does things\n"), None, None, &[]).answer();
         assert!(plan.contains("\"agent\":\"worker\""), "{plan}");
-        let review = Script::new("codex", format!("<!-- {REVIEW_MARKER} -->\nRound: 2\n[[review: revise-then-accept]]"), None, None, &[]).answer();
+        let review = Script::new(
+            "codex",
+            format!("<!-- {REVIEW_MARKER} -->\nRound: 2\n[[review: revise-then-accept]]"),
+            None,
+            None,
+            &[],
+        )
+        .answer();
         assert!(review.contains("\"verdict\":\"accept\""), "{review}");
     }
 }

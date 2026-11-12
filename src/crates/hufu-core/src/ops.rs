@@ -128,7 +128,11 @@ pub fn config_target(home: &Home, project: Option<&Path>) -> Target {
 }
 
 /// Applies an edit to a configuration file. The file is only written if the result is valid.
-pub fn edit(target: &Target, adapters: &dyn AdapterRegistry, change: impl FnOnce(&mut Value) -> Result<()>) -> Result<()> {
+pub fn edit(
+    target: &Target,
+    adapters: &dyn AdapterRegistry,
+    change: impl FnOnce(&mut Value) -> Result<()>,
+) -> Result<()> {
     let mut raw = config::read_raw(&target.path)?;
     change(&mut raw)?;
     let base = target.base.as_deref().map(config::read_raw).transpose()?;
@@ -137,7 +141,11 @@ pub fn edit(target: &Target, adapters: &dyn AdapterRegistry, change: impl FnOnce
 
 fn check_name(kind: &str, name: &str) -> Result<()> {
     let ok = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    if ok { Ok(()) } else { Err(HufuError::usage(format!("{kind} name `{name}` may only use letters, digits, `-`, `_` and `.`"))) }
+    if ok {
+        Ok(())
+    } else {
+        Err(HufuError::usage(format!("{kind} name `{name}` may only use letters, digits, `-`, `_` and `.`")))
+    }
 }
 
 /// Creates or replaces a profile. `body` is the profile as it would appear in YAML.
@@ -146,7 +154,10 @@ pub fn profile_set(path: &Target, adapters: &dyn AdapterRegistry, name: &str, bo
     edit(path, adapters, |raw| {
         let mut body = body;
         if merge {
-            if let (Some(old), Some(new)) = (config::get_path(raw, &format!("profiles.{name}")).and_then(Value::as_object).cloned(), body.as_object_mut()) {
+            if let (Some(old), Some(new)) = (
+                config::get_path(raw, &format!("profiles.{name}")).and_then(Value::as_object).cloned(),
+                body.as_object_mut(),
+            ) {
                 for (k, v) in old {
                     new.entry(k).or_insert(v);
                 }
@@ -174,11 +185,22 @@ fn remove_named(raw: &mut Value, section: &str, name: &str) -> bool {
 
 pub fn profile_remove(path: &Target, adapters: &dyn AdapterRegistry, name: &str) -> Result<()> {
     edit(path, adapters, |raw| {
-        if remove_named(raw, "profiles", name) { Ok(()) } else { Err(HufuError::usage(format!("{} has no profile `{name}`", path.display()))) }
+        if remove_named(raw, "profiles", name) {
+            Ok(())
+        } else {
+            Err(HufuError::usage(format!("{} has no profile `{name}`", path.display())))
+        }
     })
 }
 
-pub fn pool_set(path: &Target, adapters: &dyn AdapterRegistry, name: &str, members: &[String], strategy: Option<&str>, description: Option<&str>) -> Result<()> {
+pub fn pool_set(
+    path: &Target,
+    adapters: &dyn AdapterRegistry,
+    name: &str,
+    members: &[String],
+    strategy: Option<&str>,
+    description: Option<&str>,
+) -> Result<()> {
     check_name("pool", name)?;
     edit(path, adapters, |raw| {
         let mut body = json!({"members": members});
@@ -202,7 +224,11 @@ pub fn pool_set(path: &Target, adapters: &dyn AdapterRegistry, name: &str, membe
 
 pub fn pool_remove(path: &Target, adapters: &dyn AdapterRegistry, name: &str) -> Result<()> {
     edit(path, adapters, |raw| {
-        if remove_named(raw, "pools", name) { Ok(()) } else { Err(HufuError::usage(format!("{} has no pool `{name}`", path.display()))) }
+        if remove_named(raw, "pools", name) {
+            Ok(())
+        } else {
+            Err(HufuError::usage(format!("{} has no pool `{name}`", path.display())))
+        }
     })
 }
 
@@ -212,7 +238,11 @@ pub fn config_set(path: &Target, adapters: &dyn AdapterRegistry, key: &str, valu
 
 pub fn config_unset(path: &Target, adapters: &dyn AdapterRegistry, key: &str) -> Result<()> {
     edit(path, adapters, |raw| {
-        if config::remove_path(raw, key) { Ok(()) } else { Err(HufuError::usage(format!("{} does not set `{key}`", path.display()))) }
+        if config::remove_path(raw, key) {
+            Ok(())
+        } else {
+            Err(HufuError::usage(format!("{} does not set `{key}`", path.display())))
+        }
     })
 }
 
@@ -221,7 +251,9 @@ pub fn config_get(config: &Config, key: Option<&str>) -> Result<Value> {
     let all = serde_json::to_value(config).map_err(|e| HufuError::internal(e.to_string()))?;
     match key {
         None => Ok(all),
-        Some(k) => config::get_path(&all, k).cloned().ok_or_else(|| HufuError::usage(format!("no configuration key `{k}`"))),
+        Some(k) => {
+            config::get_path(&all, k).cloned().ok_or_else(|| HufuError::usage(format!("no configuration key `{k}`")))
+        }
     }
 }
 
@@ -253,7 +285,9 @@ pub struct PruneReport {
 
 /// Removes old finished jobs and missions. Running work is never touched.
 pub fn prune(home: &Home, config: &Config, opts: &PruneOptions) -> Result<PruneReport> {
-    let max_age = opts.older_than.unwrap_or_else(|| parse_duration(&config.retention.max_age).unwrap_or(Duration::from_secs(30 * 86400)));
+    let max_age = opts
+        .older_than
+        .unwrap_or_else(|| parse_duration(&config.retention.max_age).unwrap_or(Duration::from_secs(30 * 86400)));
     let keep = opts.keep.unwrap_or(config.retention.max_jobs);
     let now = now_ms();
     let mut report = PruneReport { dry_run: opts.dry_run, ..PruneReport::default() };
@@ -261,7 +295,10 @@ pub fn prune(home: &Home, config: &Config, opts: &PruneOptions) -> Result<PruneR
     let missions = mission::list(home);
     let live_missions: Vec<&str> = missions.iter().filter(|m| !m.state.is_terminal()).map(|m| m.id.as_str()).collect();
     let jobs = store::list_jobs(home);
-    let finished: Vec<&store::JobState> = jobs.iter().filter(|j| j.state.is_terminal() && !j.mission.as_deref().map(|m| live_missions.contains(&m)).unwrap_or(false)).collect();
+    let finished: Vec<&store::JobState> = jobs
+        .iter()
+        .filter(|j| j.state.is_terminal() && !j.mission.as_deref().map(|m| live_missions.contains(&m)).unwrap_or(false))
+        .collect();
     let excess = finished.len().saturating_sub(keep);
     for (i, job) in finished.iter().enumerate() {
         let ended = job.finished_at.as_deref().and_then(parse_rfc3339).unwrap_or(now);
@@ -327,19 +364,41 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hufu-ops-{}", hufu_contract::time::new_id("t")));
         let path = Target { path: dir.join("config.yaml"), base: None };
         let reg = kinds();
-        profile_set(&path, reg, "codex-work", json!({"adapter": "codex-cli", "account": "work", "home": "~/.codex-work"}), false).unwrap();
-        profile_set(&path, reg, "codex-home", json!({"adapter": "codex-cli", "account": "home", "home": "~/.codex-home"}), false).unwrap();
+        profile_set(
+            &path,
+            reg,
+            "codex-work",
+            json!({"adapter": "codex-cli", "account": "work", "home": "~/.codex-work"}),
+            false,
+        )
+        .unwrap();
+        profile_set(
+            &path,
+            reg,
+            "codex-home",
+            json!({"adapter": "codex-cli", "account": "home", "home": "~/.codex-home"}),
+            false,
+        )
+        .unwrap();
         profile_set(&path, reg, "codex-work", json!({"effort": "high", "account": null}), true).unwrap();
-        pool_set(&path, reg, "codex-any", &["codex-work".into(), "codex-home".into()], Some("round-robin"), None).unwrap();
+        pool_set(&path, reg, "codex-any", &["codex-work".into(), "codex-home".into()], Some("round-robin"), None)
+            .unwrap();
         config_set(&path, reg, "roles.advisor", json!("codex-work")).unwrap();
         config_set(&path, reg, "roles.executors", json!(["codex-any"])).unwrap();
         let raw = config::read_raw(&path.path).unwrap();
         assert_eq!(config::get_path(&raw, "profiles.codex-work.effort"), Some(&json!("high")));
-        assert_eq!(config::get_path(&raw, "profiles.codex-work.adapter"), Some(&json!("codex-cli")), "a merge keeps what was there");
+        assert_eq!(
+            config::get_path(&raw, "profiles.codex-work.adapter"),
+            Some(&json!("codex-cli")),
+            "a merge keeps what was there"
+        );
         assert_eq!(config::get_path(&raw, "profiles.codex-work.account"), None, "null removes a field");
         // Invalid edits are refused and leave the file as it was.
         assert!(pool_set(&path, reg, "bad", &["ghost".into()], None, None).is_err());
-        assert!(profile_remove(&path, reg, "codex-home").unwrap_err().message.contains("pools.codex-any"), "a profile a pool still uses cannot be removed");
+        assert!(
+            profile_remove(&path, reg, "codex-home").unwrap_err().message.contains("pools.codex-any"),
+            "a profile a pool still uses cannot be removed"
+        );
         assert!(config_set(&path, reg, "limits.max_concurrent_jobs", json!(0)).is_err());
         assert!(profile_set(&path, reg, "bad name", json!({"adapter": "codex-cli"}), false).is_err());
         pool_remove(&path, reg, "codex-any").unwrap_err();

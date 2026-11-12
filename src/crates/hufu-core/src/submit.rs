@@ -6,7 +6,10 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use hufu_contract::time::{new_id, now_rfc3339, parse_duration};
-use hufu_contract::{AdapterRegistry, Effort, EffortFallback, FORMAT_VERSION, LaunchPlan, McpServerSpec, Profile, RunRequest, Tier, effort_list, proc, tier_list};
+use hufu_contract::{
+    AdapterRegistry, Effort, EffortFallback, FORMAT_VERSION, LaunchPlan, McpServerSpec, Profile, RunRequest, Tier,
+    effort_list, proc, tier_list,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::capability;
@@ -58,7 +61,8 @@ pub fn daemon_file(home: &Home) -> PathBuf {
 /// The running daemon, if there is one.
 pub fn daemon_info(home: &Home) -> Option<DaemonInfo> {
     let info: DaemonInfo = store::read_json(&daemon_file(home)).ok()?;
-    let seen = info.heartbeat_at.as_deref().or(Some(info.started_at.as_str())).and_then(hufu_contract::time::parse_rfc3339)?;
+    let seen =
+        info.heartbeat_at.as_deref().or(Some(info.started_at.as_str())).and_then(hufu_contract::time::parse_rfc3339)?;
     let fresh = hufu_contract::time::now_ms().saturating_sub(seen) < DAEMON_STALE_AFTER.as_millis() as u64;
     (proc::pid_alive(info.pid) && fresh).then_some(info)
 }
@@ -73,23 +77,31 @@ struct Fit {
 /// Checks one profile against one task and works out the settings it would run with.
 fn fit(ctx: &Context, profile: &Profile, task: &TaskSpec, opts: &Options) -> Result<Fit> {
     let name = &profile.name;
-    let adapter = ctx
-        .adapters
-        .get(&profile.adapter)
-        .ok_or_else(|| HufuError::usage(format!("profile `{name}` uses unknown adapter `{}`; accepted: {}", profile.adapter, ctx.adapters.kinds().join(", "))))?;
+    let adapter = ctx.adapters.get(&profile.adapter).ok_or_else(|| {
+        HufuError::usage(format!(
+            "profile `{name}` uses unknown adapter `{}`; accepted: {}",
+            profile.adapter,
+            ctx.adapters.kinds().join(", ")
+        ))
+    })?;
     let caps = adapter.capabilities(profile);
     let mut warnings = Vec::new();
 
     // Permission tier: the task, then the profile, then the global default.
     let permission = task.permission.or(profile.permission).unwrap_or(ctx.config.defaults.permission);
-    if permission == Tier::FullAccess && task.permission.is_none() && !(profile.permission == Some(Tier::FullAccess) && profile.allow_full_access) {
+    if permission == Tier::FullAccess
+        && task.permission.is_none()
+        && !(profile.permission == Some(Tier::FullAccess) && profile.allow_full_access)
+    {
         return Err(HufuError::usage(
             "`full-access` must be asked for explicitly: pass `--permission full-access`, or set it on a profile together with `allow_full_access: true`",
         ));
     }
     if let Some(max) = opts.max_tier {
         if permission > max {
-            return Err(HufuError::usage(format!("permission `{permission}` exceeds the mission's limit `{max}` (`missions.max_tier`)")));
+            return Err(HufuError::usage(format!(
+                "permission `{permission}` exceeds the mission's limit `{max}` (`missions.max_tier`)"
+            )));
         }
     }
     if !caps.supports_tier(permission) {
@@ -112,18 +124,25 @@ fn fit(ctx: &Context, profile: &Profile, task: &TaskSpec, opts: &Options) -> Res
             if caps.native_effort || caps.checked_at_runtime {
                 asked.clone()
             } else {
-                return Err(HufuError::usage(format!("profile `{name}` does not accept a native effort value (`native:{v}`); accepted: {}", effort_list(&caps.efforts))));
+                return Err(HufuError::usage(format!(
+                    "profile `{name}` does not accept a native effort value (`native:{v}`); accepted: {}",
+                    effort_list(&caps.efforts)
+                )));
             }
         }
         level if caps.efforts.contains(level) || caps.checked_at_runtime => level.clone(),
         level => {
             if !explicit {
-                warnings.push(format!("the default effort `{level}` has no mapping for profile `{name}`; the agent's own default is used"));
+                warnings.push(format!(
+                    "the default effort `{level}` has no mapping for profile `{name}`; the agent's own default is used"
+                ));
                 Effort::Default
             } else if profile.effort_fallback == EffortFallback::Nearest {
                 match level.nearest(&caps.efforts) {
                     Some(near) => {
-                        warnings.push(format!("effort `{level}` has no mapping for profile `{name}`; using the nearest level `{near}`"));
+                        warnings.push(format!(
+                            "effort `{level}` has no mapping for profile `{name}`; using the nearest level `{near}`"
+                        ));
                         near
                     }
                     None => {
@@ -144,12 +163,17 @@ fn fit(ctx: &Context, profile: &Profile, task: &TaskSpec, opts: &Options) -> Res
     let model = task.model.clone().or_else(|| profile.model.clone());
     if let Some(m) = &model {
         if !caps.models.is_empty() && !caps.models.contains(m) && !caps.checked_at_runtime {
-            warnings.push(format!("model `{m}` is not in the list profile `{name}` reports; the agent decides whether it exists"));
+            warnings.push(format!(
+                "model `{m}` is not in the list profile `{name}` reports; the agent decides whether it exists"
+            ));
         }
     }
 
     if opts.resume_session.is_some() && !caps.resume {
-        return Err(HufuError::usage(format!("profile `{name}` (adapter `{}`) cannot resume a session", profile.adapter)));
+        return Err(HufuError::usage(format!(
+            "profile `{name}` (adapter `{}`) cannot resume a session",
+            profile.adapter
+        )));
     }
     Ok(Fit { permission, effort, model, warnings })
 }
@@ -185,7 +209,8 @@ fn resolve_cwd(task: &TaskSpec, base: &Path) -> Result<PathBuf> {
     let raw = task.cwd.as_deref().unwrap_or(".");
     let expanded = proc::expand_tilde(raw);
     let joined = if expanded.is_absolute() { expanded } else { base.join(expanded) };
-    let real = std::fs::canonicalize(&joined).map_err(|e| HufuError::usage(format!("cwd {}: {e}", joined.display())))?;
+    let real =
+        std::fs::canonicalize(&joined).map_err(|e| HufuError::usage(format!("cwd {}: {e}", joined.display())))?;
     if !real.is_dir() {
         return Err(HufuError::usage(format!("cwd {} is not a directory", real.display())));
     }
@@ -218,11 +243,15 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
     ctx.config.ensure_valid(ctx.adapters)?;
     if let Some(v) = task.version {
         if v != FORMAT_VERSION {
-            return Err(HufuError::usage(format!("task spec version {v} is not supported; this build reads version {FORMAT_VERSION}")));
+            return Err(HufuError::usage(format!(
+                "task spec version {v} is not supported; this build reads version {FORMAT_VERSION}"
+            )));
         }
     }
     if task.prompt.trim().is_empty() {
-        return Err(HufuError::usage("the task has no prompt; pass it as an argument, with `--prompt-file`, on stdin with `-`, or as `prompt:` in a task file"));
+        return Err(HufuError::usage(
+            "the task has no prompt; pass it as an argument, with `--prompt-file`, on stdin with `-`, or as `prompt:` in a task file",
+        ));
     }
     if task.agent.trim().is_empty() {
         return Err(HufuError::usage("the task names no agent; pass `--agent <profile-or-pool>` (see `hufu agents`)"));
@@ -232,7 +261,7 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
     // Profile or pool.
     let mut warnings = Vec::new();
     let candidates = match ctx.config.agent(&task.agent)? {
-        AgentRef::Profile(p) => vec![p],
+        AgentRef::Profile(p) => vec![*p],
         AgentRef::Pool { name, strategy, members } => {
             if members.is_empty() {
                 return Err(HufuError::usage(format!("pool `{name}` has no members")));
@@ -253,7 +282,10 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
                 // Every member must run the task under the same limits; one that would not is left out.
                 if let Some((_, first, first_cu)) = usable.first() {
                     if first.permission != f.permission {
-                        warnings.push(format!("pool member `{}` would run this task at a different permission tier and is left out", profile.name));
+                        warnings.push(format!(
+                            "pool member `{}` would run this task at a different permission tier and is left out",
+                            profile.name
+                        ));
                         continue;
                     }
                     if first_cu.plan.is_some() {
@@ -317,7 +349,9 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
             }
             "review" => {
                 if opts.mission.is_none() {
-                    return Err(HufuError::usage(format!("{at}.review: a review check needs an advisor, so it is only valid inside a mission")));
+                    return Err(HufuError::usage(format!(
+                        "{at}.review: a review check needs an advisor, so it is only valid inside a mission"
+                    )));
                 }
                 if check.review.as_deref() != Some("advisor") {
                     return Err(HufuError::usage(format!("{at}.review: the only accepted value is `advisor`")));
@@ -331,7 +365,10 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
     }
 
     let timeout_s = seconds("timeout", task.timeout.as_deref().unwrap_or(&ctx.config.defaults.timeout))?;
-    let inactivity_timeout_s = seconds("inactivity_timeout", task.inactivity_timeout.as_deref().unwrap_or(&ctx.config.defaults.inactivity_timeout))?;
+    let inactivity_timeout_s = seconds(
+        "inactivity_timeout",
+        task.inactivity_timeout.as_deref().unwrap_or(&ctx.config.defaults.inactivity_timeout),
+    )?;
     let retry = task.retry.clone().unwrap_or_else(|| ctx.config.defaults.retry.clone());
     if retry.max_attempts == 0 {
         return Err(HufuError::usage("retry.max_attempts: must be at least 1"));
@@ -341,16 +378,27 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
     // Workspace.
     let isolation = task.isolation.unwrap_or(ctx.config.defaults.isolation);
     if isolation == Isolation::Worktree {
-        let root = workspace::repo_root(&cwd)
-            .ok_or_else(|| HufuError::usage(format!("{} is not inside a git repository, which `isolation: worktree` needs", cwd.display())))?;
+        let root = workspace::repo_root(&cwd).ok_or_else(|| {
+            HufuError::usage(format!(
+                "{} is not inside a git repository, which `isolation: worktree` needs",
+                cwd.display()
+            ))
+        })?;
         if workspace::head(&root).is_none() {
-            return Err(HufuError::usage("the repository has no commit yet; `isolation: worktree` needs one to branch from"));
+            return Err(HufuError::usage(
+                "the repository has no commit yet; `isolation: worktree` needs one to branch from",
+            ));
         }
     } else if chosen.permission >= Tier::WorkspaceWrite {
         let here = cwd.display().to_string();
         let sharing: Vec<String> = store::list_jobs(ctx.home)
             .into_iter()
-            .filter(|j| !j.state.is_terminal() && j.permission >= Tier::WorkspaceWrite && j.cwd == here && j.workspace.as_ref().map(|w| !w.worktree).unwrap_or(true))
+            .filter(|j| {
+                !j.state.is_terminal()
+                    && j.permission >= Tier::WorkspaceWrite
+                    && j.cwd == here
+                    && j.workspace.as_ref().map(|w| !w.worktree).unwrap_or(true)
+            })
             .map(|j| j.id)
             .collect();
         if !sharing.is_empty() {
@@ -363,7 +411,9 @@ pub fn prepare(ctx: &Context, task: &TaskSpec, opts: &Options) -> Result<JobSpec
 
     let mut depends_on = Vec::new();
     for dep in &task.depends_on {
-        depends_on.push(store::resolve_job(ctx.home, dep).map_err(|e| HufuError::usage(format!("depends_on: {}", e.message)))?);
+        depends_on.push(
+            store::resolve_job(ctx.home, dep).map_err(|e| HufuError::usage(format!("depends_on: {}", e.message)))?,
+        );
     }
 
     Ok(JobSpec {
@@ -434,8 +484,14 @@ pub fn launch(home: &Home, id: &str) -> Result<u32> {
 
 /// Starts a job that was left for a daemon which is no longer running.
 pub fn kick(home: &Home, id: &str) {
-    let Ok(mut state) = store::load_state(home, id) else { return };
-    if state.state == State::Queued && state.runner_pid.is_none() && state.queue.as_deref() == Some("daemon") && daemon_info(home).is_none() {
+    let Ok(mut state) = store::load_state(home, id) else {
+        return;
+    };
+    if state.state == State::Queued
+        && state.runner_pid.is_none()
+        && state.queue.as_deref() == Some("daemon")
+        && daemon_info(home).is_none()
+    {
         state.queue = None;
         if store::save_state(home, &state).is_ok() {
             let _ = launch(home, id);
@@ -476,18 +532,27 @@ pub fn submit_spec(home: &Home, spec: &JobSpec, hold: bool) -> Result<JobState> 
 
 /// Starts a follow-up in the session of a finished job. The follow-up keeps the workspace, tier,
 /// acceptance checks and output schema of that job; `edit` may change what differs this time.
-pub fn resume(ctx: &Context, previous: &str, prompt: &str, hold: bool, edit: impl FnOnce(&mut JobSpec)) -> Result<JobState> {
+pub fn resume(
+    ctx: &Context,
+    previous: &str,
+    prompt: &str,
+    hold: bool,
+    edit: impl FnOnce(&mut JobSpec),
+) -> Result<JobState> {
     let old = store::load_spec(ctx.home, previous)?;
     let state = store::load_state(ctx.home, previous)?;
     if !state.state.is_terminal() {
-        return Err(HufuError::usage(format!("job `{previous}` is still {}; wait for it or cancel it before resuming its session", state.state.as_str())));
+        return Err(HufuError::usage(format!(
+            "job `{previous}` is still {}; wait for it or cancel it before resuming its session",
+            state.state.as_str()
+        )));
     }
     let result = store::load_result(ctx.home, previous)?;
-    let session = result
-        .as_ref()
-        .and_then(|r| r.session.clone())
-        .filter(|s| s.resumable)
-        .ok_or_else(|| HufuError::usage(format!("job `{previous}` left no resumable session; start a new job with the context it needs instead")))?;
+    let session = result.as_ref().and_then(|r| r.session.clone()).filter(|s| s.resumable).ok_or_else(|| {
+        HufuError::usage(format!(
+            "job `{previous}` left no resumable session; start a new job with the context it needs instead"
+        ))
+    })?;
     if prompt.trim().is_empty() {
         return Err(HufuError::usage("the follow-up has no prompt"));
     }
@@ -562,12 +627,28 @@ pub fn missing_env(profile: &Profile) -> Vec<String> {
 pub fn handover_server(home: &Home, job: &str) -> Result<McpServerSpec> {
     let mut env = std::collections::BTreeMap::new();
     env.insert("HUFU_HOME".to_string(), home.root.display().to_string());
-    Ok(McpServerSpec { name: "hufu".into(), command: hufu_exe()?.display().to_string(), args: vec!["mcp".into(), "--child-of".into(), job.to_string()], env })
+    Ok(McpServerSpec {
+        name: "hufu".into(),
+        command: hufu_exe()?.display().to_string(),
+        args: vec!["mcp".into(), "--child-of".into(), job.to_string()],
+        env,
+    })
 }
 
 /// The request an adapter receives for one attempt with one profile.
-pub fn run_request(home: &Home, adapters: &dyn AdapterRegistry, spec: &JobSpec, profile: &Profile, primary: bool, cwd: &Path) -> Result<RunRequest> {
-    let (effort, model) = if primary { (spec.effort.clone(), spec.model.clone()) } else { (profile.effort.clone().unwrap_or_default(), profile.model.clone()) };
+pub fn run_request(
+    home: &Home,
+    adapters: &dyn AdapterRegistry,
+    spec: &JobSpec,
+    profile: &Profile,
+    primary: bool,
+    cwd: &Path,
+) -> Result<RunRequest> {
+    let (effort, model) = if primary {
+        (spec.effort.clone(), spec.model.clone())
+    } else {
+        (profile.effort.clone().unwrap_or_default(), profile.model.clone())
+    };
     let mut prompt = spec.prompt.clone();
     let mut mcp_servers = Vec::new();
     if let Some(plan) = &spec.computer_use {
@@ -593,7 +674,10 @@ pub fn run_request(home: &Home, adapters: &dyn AdapterRegistry, spec: &JobSpec, 
 
 /// The exact invocation a job would use, for `--dry-run`.
 pub fn launch_plan(ctx: &Context, spec: &JobSpec) -> Result<LaunchPlan> {
-    let adapter = ctx.adapters.get(&spec.profile.adapter).ok_or_else(|| HufuError::usage(format!("unknown adapter `{}`", spec.profile.adapter)))?;
+    let adapter = ctx
+        .adapters
+        .get(&spec.profile.adapter)
+        .ok_or_else(|| HufuError::usage(format!("unknown adapter `{}`", spec.profile.adapter)))?;
     let req = run_request(ctx.home, ctx.adapters, spec, &spec.profile, true, &spec.cwd)?;
     adapter.plan(&spec.profile, &req).map_err(|e| HufuError::usage(e.0))
 }

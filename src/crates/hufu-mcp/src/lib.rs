@@ -55,19 +55,25 @@ impl Server<'_> {
         let id = msg.get("id").cloned().unwrap_or(Value::Null);
         let Some(method) = msg.get("method").and_then(Value::as_str) else {
             // A response to something we never asked, or garbage with an id.
-            return (!id.is_null() && msg.get("result").is_none() && msg.get("error").is_none()).then(|| error(&id, -32600, "invalid request: no method"));
+            return (!id.is_null() && msg.get("result").is_none() && msg.get("error").is_none())
+                .then(|| error(&id, -32600, "invalid request: no method"));
         };
         if id.is_null() {
             return None;
         }
         let params = msg.get("params").cloned().unwrap_or(json!({}));
         // Hosts on the handshake-free revision name their version on every request.
-        let stated = params.pointer(&format!("/_meta/{}", VERSION_META.replace('/', "~1"))).and_then(Value::as_str).map(str::to_string);
+        let stated = params
+            .pointer(&format!("/_meta/{}", VERSION_META.replace('/', "~1")))
+            .and_then(Value::as_str)
+            .map(str::to_string);
         if let Some(v) = &stated {
             if v != STATELESS_VERSION && !HANDSHAKE_VERSIONS.contains(&v.as_str()) {
                 let mut supported = vec![STATELESS_VERSION];
                 supported.extend(HANDSHAKE_VERSIONS);
-                return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32022, "message": format!("unsupported protocol version `{v}`"), "data": {"supported": supported}}}));
+                return Some(
+                    json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32022, "message": format!("unsupported protocol version `{v}`"), "data": {"supported": supported}}}),
+                );
             }
         }
         let stateless = stated.as_deref() == Some(STATELESS_VERSION);
@@ -83,12 +89,16 @@ impl Server<'_> {
             "initialize" => {
                 let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
                 let version = if HANDSHAKE_VERSIONS.contains(&asked) { asked } else { HANDSHAKE_VERSIONS[0] };
-                done(json!({"protocolVersion": version, "capabilities": self.capabilities(), "serverInfo": self.info(), "instructions": INSTRUCTIONS}))
+                done(
+                    json!({"protocolVersion": version, "capabilities": self.capabilities(), "serverInfo": self.info(), "instructions": INSTRUCTIONS}),
+                )
             }
             "server/discover" => {
                 let mut supported = vec![STATELESS_VERSION];
                 supported.extend(HANDSHAKE_VERSIONS);
-                done(json!({"supportedVersions": supported, "capabilities": self.capabilities(), "serverInfo": self.info(), "instructions": INSTRUCTIONS}))
+                done(
+                    json!({"supportedVersions": supported, "capabilities": self.capabilities(), "serverInfo": self.info(), "instructions": INSTRUCTIONS}),
+                )
             }
             "ping" => done(json!({})),
             "tools/list" => done(json!({"tools": tools::list(self.child_of.is_some())})),
@@ -110,7 +120,9 @@ impl Server<'_> {
                         }
                         done(result)
                     }
-                    Err(e) => done(json!({"content": [{"type": "text", "text": format!("{}: {}", e.kind_str(), e.message)}], "isError": true})),
+                    Err(e) => done(
+                        json!({"content": [{"type": "text", "text": format!("{}: {}", e.kind_str(), e.message)}], "isError": true}),
+                    ),
                 }
             }
             "resources/list" => done(json!({"resources": []})),

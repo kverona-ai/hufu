@@ -4,7 +4,7 @@
 //! soft-denied in headless mode: the run carries on and exits 0, so denial detection is mandatory.
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, Profile, ProbeResult,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
     RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
 };
 use serde_json::Value;
@@ -36,7 +36,10 @@ impl Adapter for AgyCli {
     fn probe(&self, profile: &Profile) -> ProbeResult {
         let (mut probe, _) = common::probe_cli(profile, DEFAULT, INSTALL);
         if probe.installed {
-            probe.detail = Some("login state cannot be read without running the agent; headless runs use the cached interactive login".into());
+            probe.detail = Some(
+                "login state cannot be read without running the agent; headless runs use the cached interactive login"
+                    .into(),
+            );
             probe.hint = Some("run `agy` once interactively if jobs fail with auth_required".into());
         }
         probe
@@ -107,7 +110,10 @@ impl Adapter for AgyCli {
         if let Some(schema) = &req.output_schema {
             let path = req.scratch_dir.join("output-schema.json");
             if let Err(e) = std::fs::write(&path, serde_json::to_vec_pretty(schema).unwrap_or_default()) {
-                return RunOutcome::failed(hufu_contract::reason::INTERNAL, format!("cannot write {}: {e}", path.display()));
+                return RunOutcome::failed(
+                    hufu_contract::reason::INTERNAL,
+                    format!("cannot write {}: {e}", path.display()),
+                );
             }
         }
         let mut s = State::default();
@@ -132,7 +138,9 @@ impl Adapter for AgyCli {
 }
 
 fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     match v.get("event").and_then(Value::as_str).unwrap_or("") {
         "init" => {
             if let Some(id) = v.get("conversation_id").and_then(Value::as_str).filter(|x| !x.is_empty()) {
@@ -140,7 +148,9 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
             }
         }
         "step_update" => {
-            let Some(step) = v.get("step_update") else { return };
+            let Some(step) = v.get("step_update") else {
+                return;
+            };
             let done = step.get("state").and_then(Value::as_str) == Some("DONE");
             let index = step.get("step_index").map(|i| i.to_string()).unwrap_or_default();
             match step.get("step_type").and_then(Value::as_str).unwrap_or("") {
@@ -155,10 +165,15 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
                 }
                 "tool" => {
                     let info = step.get("tool_info").cloned().unwrap_or(Value::Null);
-                    let name = step.get("tool_name").or_else(|| info.get("name")).and_then(Value::as_str).unwrap_or("tool");
+                    let name =
+                        step.get("tool_name").or_else(|| info.get("name")).and_then(Value::as_str).unwrap_or("tool");
                     let kind = common::tool_kind(name);
                     let params = info.get("parameters").cloned().unwrap_or(Value::Null);
-                    let title = match params.get("CommandLine").or_else(|| params.get("AbsolutePath")).or_else(|| params.get("TargetFile")) {
+                    let title = match params
+                        .get("CommandLine")
+                        .or_else(|| params.get("AbsolutePath"))
+                        .or_else(|| params.get("TargetFile"))
+                    {
                         Some(x) => format!("{name}: {}", common::title_of(x)),
                         None => name.to_string(),
                     };
@@ -179,7 +194,9 @@ fn parse_line(s: &mut State, sink: &dyn EventSink, line: &str) {
                             s.c.deny(sink, &title, kind, text.trim());
                         }
                     } else if done && kind == "edit" {
-                        if let Some(path) = params.get("TargetFile").or_else(|| params.get("AbsolutePath")).and_then(Value::as_str) {
+                        if let Some(path) =
+                            params.get("TargetFile").or_else(|| params.get("AbsolutePath")).and_then(Value::as_str)
+                        {
                             s.c.touch(path);
                         }
                     }
@@ -270,7 +287,11 @@ mod tests {
     fn an_error_status_fails_the_run() {
         let sink = Memory::default();
         let mut s = State::default();
-        parse_line(&mut s, &sink, r#"{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection"}}"#);
+        parse_line(
+            &mut s,
+            &sink,
+            r#"{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection"}}"#,
+        );
         let out = s.c.outcome(&sink, ended(1), &request(Tier::ReadOnly), true, "");
         assert_eq!(out.reason.as_deref(), Some(hufu_contract::reason::AGENT_ERROR));
         assert!(out.detail.unwrap().contains("invalid model"));

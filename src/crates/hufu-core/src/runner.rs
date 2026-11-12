@@ -9,7 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use hufu_contract::time::{now_rfc3339, parse_duration, parse_rfc3339};
-use hufu_contract::{AdapterRegistry, CancelReason, CancelToken, Event, EventBody, EventSink, FORMAT_VERSION, Profile, RawStream, RunOutcome, RunStatus, Tier, Usage, proc, reason};
+use hufu_contract::{
+    AdapterRegistry, CancelReason, CancelToken, Event, EventBody, EventSink, FORMAT_VERSION, Profile, RawStream,
+    RunOutcome, RunStatus, Tier, Usage, proc, reason,
+};
 
 use crate::config::{self, Config, Home, Isolation, Route};
 use crate::error::{HufuError, Result};
@@ -75,7 +78,9 @@ impl Shared<'_> {
     }
 
     fn has_running_children(&self) -> bool {
-        store::children_of(self.home, self.id).iter().any(|c| store::load_state(self.home, c).map(|s| !s.state.is_terminal()).unwrap_or(false))
+        store::children_of(self.home, self.id)
+            .iter()
+            .any(|c| store::load_state(self.home, c).map(|s| !s.state.is_terminal()).unwrap_or(false))
     }
 }
 
@@ -236,7 +241,7 @@ fn wants<'a>(config: &Config, spec: &'a JobSpec, profile: &'a Profile) -> slots:
         // A computer-use step runs while its parent holds a slot; counting it would deadlock a full queue.
         counted: !operator,
         display: operator || own_display,
-        max_jobs: config.limits.max_concurrent_jobs,
+        max_jobs: config.limits.max_concurrent_jobs.max(1),
         max_for_profile: config.limits.per_profile.get(&profile.name).copied(),
         max_display: config.capabilities.computer_use.max_concurrent,
     }
@@ -282,13 +287,19 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             match store::load_state(home, dep) {
                 Ok(d) if d.state.is_terminal() => {
                     if d.state != State::Succeeded || d.verdict == Verdict::Rejected {
-                        let how = if d.state == State::Succeeded { "was rejected by its tally check".to_string() } else { format!("ended as {}", d.state.as_str()) };
+                        let how = if d.state == State::Succeeded {
+                            "was rejected by its tally check".to_string()
+                        } else {
+                            format!("ended as {}", d.state.as_str())
+                        };
                         return end.fail(reason::DEPENDENCY_FAILED, format!("dependency `{dep}` {how}"));
                     }
                     break;
                 }
                 Ok(_) => std::thread::sleep(Duration::from_millis(400)),
-                Err(_) => return end.fail(reason::DEPENDENCY_FAILED, format!("dependency `{dep}` no longer exists")),
+                Err(_) => {
+                    return end.fail(reason::DEPENDENCY_FAILED, format!("dependency `{dep}` no longer exists"));
+                }
             }
         }
     }
@@ -330,7 +341,13 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     } else {
         before = workspace::snapshot(&spec.cwd);
         shared.update(|s| {
-            s.workspace = Some(store::WorkspaceInfo { path: spec.cwd.display().to_string(), repo: workspace::repo_root(&spec.cwd).map(|r| r.display().to_string()), branch: None, base: None, worktree: false });
+            s.workspace = Some(store::WorkspaceInfo {
+                path: spec.cwd.display().to_string(),
+                repo: workspace::repo_root(&spec.cwd).map(|r| r.display().to_string()),
+                branch: None,
+                base: None,
+                worktree: false,
+            });
         });
         spec.cwd.clone()
     };
@@ -366,7 +383,14 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
 
         let missing = submit::missing_env(profile);
         let outcome = if !missing.is_empty() {
-            RunOutcome::failed(reason::AUTH_REQUIRED, format!("profile `{}` reads {} from the environment, but it is not set", profile.name, missing.join(", ")))
+            RunOutcome::failed(
+                reason::AUTH_REQUIRED,
+                format!(
+                    "profile `{}` reads {} from the environment, but it is not set",
+                    profile.name,
+                    missing.join(", ")
+                ),
+            )
         } else {
             match submit::run_request(home, adapters, spec, profile, member == 0, &run_dir) {
                 Err(e) => RunOutcome::failed(reason::INTERNAL, e.message),
@@ -391,8 +415,14 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             member += 1;
             tries_on_member = 0;
             let next = members[member];
-            sink.emit(EventBody::warning(format!("profile `{}` cannot serve ({why}: {}); switching to `{}`", profile.name, proc::tail(&detail, 200), next.name)));
-            end.warnings.push(format!("profile `{}` could not serve ({why}); the job ran on `{}`", profile.name, next.name));
+            sink.emit(EventBody::warning(format!(
+                "profile `{}` cannot serve ({why}: {}); switching to `{}`",
+                profile.name,
+                proc::tail(&detail, 200),
+                next.name
+            )));
+            end.warnings
+                .push(format!("profile `{}` could not serve ({why}); the job ran on `{}`", profile.name, next.name));
             drop(slot);
             match acquire(shared, config, spec, next) {
                 Some(s) => slot = s,
@@ -401,7 +431,11 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             continue;
         }
         if tries_on_member < spec.retry.max_attempts && spec.retry.on.iter().any(|r| r == &why) {
-            sink.emit(EventBody::warning(format!("attempt {} failed ({why}); retrying in {}s", end.attempts, backoff.as_secs())));
+            sink.emit(EventBody::warning(format!(
+                "attempt {} failed ({why}); retrying in {}s",
+                end.attempts,
+                backoff.as_secs()
+            )));
             if !shared.sleep(backoff) {
                 break outcome;
             }
@@ -414,7 +448,9 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     // 5. What changed.
     let mut files: Vec<String> = match (&worktree, &before) {
         (Some(wt), _) => workspace::changed_since(&wt.path, &wt.base),
-        (None, Some(b)) => workspace::snapshot(&spec.cwd).map(|after| workspace::changed(b, &after)).unwrap_or_default(),
+        (None, Some(b)) => {
+            workspace::snapshot(&spec.cwd).map(|after| workspace::changed(b, &after)).unwrap_or_default()
+        }
         // Without a snapshot, what the agent reported is all there is. Agents name paths either way.
         (None, None) => outcome.touched_paths.iter().map(|p| workspace::relative_to(&run_dir, p)).collect(),
     };
@@ -469,10 +505,17 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             end.reason = Some(reason::PERMISSION_DENIED.into());
             end.detail = Some(format!("the agent skipped actions for lack of permission: {}", list.join(", ")));
         } else {
-            end.warnings.push(format!("the agent skipped {} action(s) for lack of permission; see `denied_actions`", list.len()));
+            end.warnings.push(format!(
+                "the agent skipped {} action(s) for lack of permission; see `denied_actions`",
+                list.len()
+            ));
         }
     }
-    let other_writers = if spec.permission == Tier::ReadOnly && !files.is_empty() && worktree.is_none() { overlapping_writers(shared, spec) } else { Vec::new() };
+    let other_writers = if spec.permission == Tier::ReadOnly && !files.is_empty() && worktree.is_none() {
+        overlapping_writers(shared, spec)
+    } else {
+        Vec::new()
+    };
     if spec.permission == Tier::ReadOnly && !files.is_empty() && !other_writers.is_empty() {
         // Another job was writing here at the same time, so the changes cannot be pinned on this one.
         end.warnings.push(format!("{} file(s) changed during this read-only job, while {} was writing to the same workspace; the read-only check could not be applied", files.len(), other_writers.join(", ")));
@@ -495,7 +538,8 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
                 None => {
                     end.state = State::Failed;
                     end.reason = Some(reason::INVALID_OUTPUT.into());
-                    end.detail = Some("the task asked for structured output, but the final answer contains no JSON".into());
+                    end.detail =
+                        Some("the task asked for structured output, but the final answer contains no JSON".into());
                 }
                 Some(value) => {
                     schema::fill_nullable(wanted, value);
@@ -503,7 +547,8 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
                     if !errors.is_empty() {
                         end.state = State::Failed;
                         end.reason = Some(reason::INVALID_OUTPUT.into());
-                        end.detail = Some(format!("the structured output does not match the schema: {}", errors.join("; ")));
+                        end.detail =
+                            Some(format!("the structured output does not match the schema: {}", errors.join("; ")));
                     }
                 }
             }
@@ -516,7 +561,12 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
             s.last_activity = Some("running acceptance checks".into());
             s.last_activity_at = Some(now_rfc3339());
         });
-        let evidence = Evidence { workspace: &run_dir, changed_files: &files, structured_output: outcome.structured_output.as_ref(), denied_actions: &outcome.denied_actions };
+        let evidence = Evidence {
+            workspace: &run_dir,
+            changed_files: &files,
+            structured_output: outcome.structured_output.as_ref(),
+            denied_actions: &outcome.denied_actions,
+        };
         end.tally = tally::run(&spec.acceptance, &evidence);
         end.verdict = if tally::all_passed(&end.tally) { Verdict::Accepted } else { Verdict::Rejected };
         let _ = store::write_json(&home.job(&spec.id).join("tally.json"), &end.tally);
@@ -533,7 +583,9 @@ fn overlapping_writers(shared: &Shared, spec: &JobSpec) -> Vec<String> {
     store::list_jobs(shared.home)
         .into_iter()
         .filter(|j| j.id != spec.id && j.permission >= Tier::WorkspaceWrite)
-        .filter(|j| j.finished_at.as_deref().and_then(parse_rfc3339).map(|end| end >= started).unwrap_or(j.started_at.is_some()))
+        .filter(|j| {
+            j.finished_at.as_deref().and_then(parse_rfc3339).map(|end| end >= started).unwrap_or(j.started_at.is_some())
+        })
         .filter(|j| {
             let path = j.workspace.as_ref().map(|w| PathBuf::from(&w.path)).unwrap_or_else(|| PathBuf::from(&j.cwd));
             path.starts_with(&here) || here.starts_with(&path)
@@ -551,7 +603,11 @@ fn write_end(shared: &Shared, sink: &JobSink, spec: &JobSpec, end: End) -> JobSt
         }
     }
     let finished = now_rfc3339();
-    let (effort, model) = if end.primary { (spec.effort.clone(), spec.model.clone()) } else { (end.profile.effort.clone().unwrap_or_default(), end.profile.model.clone()) };
+    let (effort, model) = if end.primary {
+        (spec.effort.clone(), spec.model.clone())
+    } else {
+        (end.profile.effort.clone().unwrap_or_default(), end.profile.model.clone())
+    };
     let outcome = end.outcome;
     let state = {
         let mut state = lock(&shared.state);
@@ -680,7 +736,12 @@ fn synthesize(spec: &JobSpec, state: &JobState) -> JobResult {
         warnings: spec.warnings.clone(),
         usage: None,
         session: None,
-        timing: Timing { queued_at: state.created_at.clone(), started_at: state.started_at.clone(), finished_at: finished, duration_s: state.elapsed_s() },
+        timing: Timing {
+            queued_at: state.created_at.clone(),
+            started_at: state.started_at.clone(),
+            finished_at: finished,
+            duration_s: state.elapsed_s(),
+        },
         tally: Vec::new(),
         attempts: state.attempt,
         children: Vec::new(),
@@ -777,7 +838,10 @@ mod tests {
     use crate::config::{check_raw, parse_yaml};
     use crate::spec::TaskSpec;
     use crate::submit::{Context, Options};
-    use hufu_contract::{Adapter, AdapterError, Capabilities, DeniedAction, LaunchPlan, ProbeResult, RunRequest, SessionRef, StructuredOutput};
+    use hufu_contract::{
+        Adapter, AdapterError, Capabilities, DeniedAction, LaunchPlan, ProbeResult, RunRequest, SessionRef,
+        StructuredOutput,
+    };
     use serde_json::json;
 
     /// An in-process agent whose behaviour is chosen by the profile's `model`.
@@ -832,7 +896,8 @@ mod tests {
                 }
                 "deny" => {
                     out.final_message = Some("could not run the tests".into());
-                    out.denied_actions = vec![DeniedAction { tool: "npm test".into(), kind: "execute".into(), detail: String::new() }];
+                    out.denied_actions =
+                        vec![DeniedAction { tool: "npm test".into(), kind: "execute".into(), detail: String::new() }];
                 }
                 "json" => {
                     out.final_message = Some("{\"ok\": true}".into());
@@ -896,7 +961,10 @@ mod tests {
         assert_eq!(result.verdict, Verdict::Unchecked);
         let events = store::read_events(&b.home, &state.id, 0);
         let kinds: Vec<String> = events.iter().map(|e| e.body.summary()).collect();
-        assert!(kinds.first().unwrap().contains("starting") && kinds.last().unwrap().contains("succeeded"), "{kinds:?}");
+        assert!(
+            kinds.first().unwrap().contains("starting") && kinds.last().unwrap().contains("succeeded"),
+            "{kinds:?}"
+        );
         assert!(events.windows(2).all(|w| w[0].seq + 1 == w[1].seq));
         assert!(slots::live(&b.home).is_empty(), "the slot is released");
     }
@@ -922,7 +990,9 @@ mod tests {
 
         let task = TaskSpec::from_text("prompt: x\nagent: hang\n").unwrap();
         let ctx = Context { home: &b.home, config: &b.config, adapters: &Reg };
-        let queued = submit::submit(&ctx, &task, &Options { base_dir: b.dir.clone(), hold: true, ..Options::default() }).unwrap();
+        let queued =
+            submit::submit(&ctx, &task, &Options { base_dir: b.dir.clone(), hold: true, ..Options::default() })
+                .unwrap();
         let (home, id) = (b.home.clone(), queued.id.clone());
         let canceller = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(400));
@@ -933,7 +1003,8 @@ mod tests {
         assert_eq!(state.state, State::Cancelled);
 
         // A job nobody started is cancelled on the spot.
-        let idle = submit::submit(&ctx, &task, &Options { base_dir: b.dir.clone(), hold: true, ..Options::default() }).unwrap();
+        let idle = submit::submit(&ctx, &task, &Options { base_dir: b.dir.clone(), hold: true, ..Options::default() })
+            .unwrap();
         assert_eq!(cancel(&b.home, &idle.id).unwrap().state, State::Cancelled);
         assert_eq!(result_of(&b.home, &idle.id).unwrap().unwrap().state, State::Cancelled);
     }
@@ -941,12 +1012,18 @@ mod tests {
     #[test]
     fn tally_checks_decide_the_verdict() {
         let b = bench();
-        let (state, result) = run(&b, "prompt: x\nagent: write\npermission: workspace-write\nacceptance:\n  - command: exit 0\n  - command: exit 3\n");
+        let (state, result) = run(
+            &b,
+            "prompt: x\nagent: write\npermission: workspace-write\nacceptance:\n  - command: exit 0\n  - command: exit 3\n",
+        );
         assert_eq!(state.state, State::Succeeded);
         assert_eq!(state.verdict, Verdict::Rejected);
         assert_eq!(result.tally.iter().map(|t| t.passed).collect::<Vec<_>>(), [true, false]);
         assert_eq!(result.changes.files, ["made-by-agent.txt"], "outside git, the agent's own report is used");
-        let (ok, _) = run(&b, "prompt: x\nagent: json\noutput:\n  schema: {type: object, required: [ok]}\nacceptance:\n  - schema: {type: object}\n  - no_denied_actions: true\n");
+        let (ok, _) = run(
+            &b,
+            "prompt: x\nagent: json\noutput:\n  schema: {type: object, required: [ok]}\nacceptance:\n  - schema: {type: object}\n  - no_denied_actions: true\n",
+        );
         assert_eq!((ok.state, ok.verdict), (State::Succeeded, Verdict::Accepted));
         let (bad, _) = run(&b, "prompt: x\nagent: json\noutput:\n  schema: {type: object, required: [missing]}\n");
         assert_eq!((bad.state, bad.reason.as_deref()), (State::Failed, Some("invalid_output")));
@@ -961,7 +1038,11 @@ mod tests {
         let (strict, _) = run(&b, "prompt: x\nagent: deny\nstrict_permissions: true\n");
         assert_eq!((strict.state, strict.reason.as_deref()), (State::Failed, Some("permission_denied")));
         let (violated, _) = run(&b, "prompt: x\nagent: write\n");
-        assert_eq!((violated.state, violated.reason.as_deref()), (State::Failed, Some("tier_violated")), "a read-only job that changed files fails");
+        assert_eq!(
+            (violated.state, violated.reason.as_deref()),
+            (State::Failed, Some("tier_violated")),
+            "a read-only job that changed files fails"
+        );
     }
 
     #[test]
@@ -972,7 +1053,11 @@ mod tests {
         assert_eq!((blocked.state, blocked.reason.as_deref()), (State::Failed, Some("dependency_failed")));
 
         let git = |args: &[&str]| workspace::git(&b.dir, args).map(|c| c.ok()).unwrap_or(false);
-        if !(git(&["init", "-q"]) && std::fs::write(b.dir.join("a.txt"), "a\n").is_ok() && git(&["add", "."]) && git(&["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init"])) {
+        if !(git(&["init", "-q"])
+            && std::fs::write(b.dir.join("a.txt"), "a\n").is_ok()
+            && git(&["add", "."])
+            && git(&["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init"]))
+        {
             return;
         }
         let (state, result) = run(&b, "prompt: x\nagent: write\npermission: workspace-write\nisolation: worktree\n");
@@ -982,6 +1067,9 @@ mod tests {
         assert!(!b.dir.join("made-by-agent.txt").exists(), "the main tree is untouched");
         let (clean, result) = run(&b, "prompt: x\nagent: ok\nisolation: worktree\n");
         assert_eq!(clean.state, State::Succeeded);
-        assert!(result.changes.branch.is_none() && !b.home.worktrees().join(&clean.id).exists(), "an unchanged copy is removed");
+        assert!(
+            result.changes.branch.is_none() && !b.home.worktrees().join(&clean.id).exists(),
+            "an unchanged copy is removed"
+        );
     }
 }

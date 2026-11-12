@@ -25,8 +25,10 @@ impl SchemaRef {
             SchemaRef::Inline(v) => Ok(v.clone()),
             SchemaRef::Path(p) => {
                 let path = if Path::new(p).is_absolute() { PathBuf::from(p) } else { base.join(p) };
-                let text = std::fs::read_to_string(&path).map_err(|e| HufuError::usage(format!("schema file {}: {e}", path.display())))?;
-                crate::config::parse_yaml(&text).map_err(|e| HufuError::usage(format!("schema file {}: {e}", path.display())))
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| HufuError::usage(format!("schema file {}: {e}", path.display())))?;
+                crate::config::parse_yaml(&text)
+                    .map_err(|e| HufuError::usage(format!("schema file {}: {e}", path.display())))
             }
         }
     }
@@ -144,7 +146,8 @@ pub struct TaskSpec {
 impl TaskSpec {
     /// Reads a task spec from a YAML or JSON file.
     pub fn from_file(path: &Path) -> Result<TaskSpec> {
-        let text = std::fs::read_to_string(path).map_err(|e| HufuError::usage(format!("task file {}: {e}", path.display())))?;
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| HufuError::usage(format!("task file {}: {e}", path.display())))?;
         TaskSpec::from_text(&text).map_err(|e| HufuError::usage(format!("task file {}: {}", path.display(), e.message)))
     }
 
@@ -219,7 +222,11 @@ pub struct JobSpec {
 /// The first line of a prompt, clipped, for listings.
 pub fn title_from_prompt(prompt: &str) -> String {
     let line = prompt.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("untitled task");
-    if line.chars().count() > 72 { format!("{}…", line.chars().take(72).collect::<String>()) } else { line.to_string() }
+    if line.chars().count() > 72 {
+        format!("{}…", line.chars().take(72).collect::<String>())
+    } else {
+        line.to_string()
+    }
 }
 
 #[cfg(test)]

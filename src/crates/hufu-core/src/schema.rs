@@ -35,14 +35,22 @@ fn fill(root: &Value, schema: &Value, value: &mut Value, depth: usize) {
     if depth > 64 {
         return;
     }
-    let schema = match schema.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix('#')).and_then(|p| root.pointer(p)) {
+    let schema = match schema
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|r| r.strip_prefix('#'))
+        .and_then(|p| root.pointer(p))
+    {
         Some(target) => target,
         None => schema,
     };
     match value {
         Value::Object(map) => {
-            let Some(props) = schema.get("properties").and_then(Value::as_object) else { return };
-            for name in schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+            let Some(props) = schema.get("properties").and_then(Value::as_object) else {
+                return;
+            };
+            for name in schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
+            {
                 if !map.contains_key(name) && props.get(name).map(admits_null).unwrap_or(false) {
                     map.insert(name.to_string(), Value::Null);
                 }
@@ -105,7 +113,9 @@ fn check(root: &Value, schema: &Value, v: &Value, path: &str, errors: &mut Vec<S
     if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
         match reference.strip_prefix('#').and_then(|p| root.pointer(p)) {
             Some(target) => check(root, target, v, path, errors, depth + 1),
-            None => errors.push(format!("{path}: cannot resolve $ref `{reference}` (only local references are supported)")),
+            None => {
+                errors.push(format!("{path}: cannot resolve $ref `{reference}` (only local references are supported)"))
+            }
         }
     }
     match schema.get("type") {
@@ -134,7 +144,8 @@ fn check(root: &Value, schema: &Value, v: &Value, path: &str, errors: &mut Vec<S
     let num = |key: &str| schema.get(key).and_then(Value::as_f64);
     match v {
         Value::Object(map) => {
-            for name in schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+            for name in schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
+            {
                 if !map.contains_key(name) {
                     errors.push(format!("{path}: missing required property `{name}`"));
                 }

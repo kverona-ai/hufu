@@ -2,7 +2,7 @@
 //! under another advisor.
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, Profile, ProbeResult,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
     RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
 };
 use serde_json::{Value, json};
@@ -12,8 +12,14 @@ use crate::common::{self, Collected};
 const DEFAULT: &[&str] = &["claude"];
 const INSTALL: &str = "install Claude Code: `curl -fsSL https://claude.ai/install.sh | bash` or `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in";
 const FORBIDDEN: &[&str] = &[
-    "--permission-mode", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--allowedTools",
-    "--allowed-tools", "--add-dir", "--permission-prompt-tool", "--settings",
+    "--permission-mode",
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--allowedTools",
+    "--allowed-tools",
+    "--add-dir",
+    "--permission-prompt-tool",
+    "--settings",
 ];
 
 pub struct ClaudeCli;
@@ -87,10 +93,15 @@ impl Adapter for ClaudeCli {
         }
         match &req.effort {
             Effort::Default => {}
-            Effort::Low | Effort::Medium | Effort::High | Effort::Max => a.extend(["--effort".into(), req.effort.to_string()]),
+            Effort::Low | Effort::Medium | Effort::High | Effort::Max => {
+                a.extend(["--effort".into(), req.effort.to_string()])
+            }
             Effort::Native(v) => a.extend(["--effort".into(), v.clone()]),
             Effort::Off => {
-                return Err(AdapterError("Claude Code has no `off` effort level; accepted: default, low, medium, high, max, native:<value>".into()));
+                return Err(AdapterError(
+                    "Claude Code has no `off` effort level; accepted: default, low, medium, high, max, native:<value>"
+                        .into(),
+                ));
             }
         }
         if let Some(session) = &req.resume_session {
@@ -122,12 +133,20 @@ impl Adapter for ClaudeCli {
                 parse_line(&mut c, sink, line);
             }
         });
-        c.outcome(sink, ended, req, true, "run `claude` and sign in with /login, or pass ANTHROPIC_API_KEY through the profile's `env`")
+        c.outcome(
+            sink,
+            ended,
+            req,
+            true,
+            "run `claude` and sign in with /login, or pass ANTHROPIC_API_KEY through the profile's `env`",
+        )
     }
 }
 
 pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     if let Some(id) = v.get("session_id").and_then(Value::as_str).filter(|x| !x.is_empty()) {
         c.session = Some(id.to_string());
     }
@@ -140,12 +159,19 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
                     "text" if !nested => c.message(sink, block.get("text").and_then(Value::as_str).unwrap_or("")),
                     "thinking" => {
                         c.flush(sink);
-                        sink.emit(EventBody::AgentThought { text: block.get("thinking").and_then(Value::as_str).unwrap_or("").to_string() });
+                        sink.emit(EventBody::AgentThought {
+                            text: block.get("thinking").and_then(Value::as_str).unwrap_or("").to_string(),
+                        });
                     }
                     "tool_use" => {
                         let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
                         let input = block.get("input").cloned().unwrap_or(Value::Null);
-                        let target = input.get("file_path").or_else(|| input.get("command")).or_else(|| input.get("pattern")).or_else(|| input.get("url")).map(common::title_of);
+                        let target = input
+                            .get("file_path")
+                            .or_else(|| input.get("command"))
+                            .or_else(|| input.get("pattern"))
+                            .or_else(|| input.get("url"))
+                            .map(common::title_of);
                         let title = match target {
                             Some(t) if !t.is_empty() => format!("{name}: {t}"),
                             _ => name.to_string(),
@@ -156,7 +182,13 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
                                 c.touch(p);
                             }
                         }
-                        c.tool(sink, block.get("id").and_then(Value::as_str).unwrap_or("tool"), kind, &title, "in_progress");
+                        c.tool(
+                            sink,
+                            block.get("id").and_then(Value::as_str).unwrap_or("tool"),
+                            kind,
+                            &title,
+                            "in_progress",
+                        );
                     }
                     _ => {}
                 }
@@ -204,7 +236,8 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
             let text = v.get("result").and_then(Value::as_str).unwrap_or("");
             let subtype = v.get("subtype").and_then(Value::as_str).unwrap_or("success");
             if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) || subtype != "success" {
-                let msg = if text.is_empty() { format!("Claude Code ended with `{subtype}`") } else { text.to_string() };
+                let msg =
+                    if text.is_empty() { format!("Claude Code ended with `{subtype}`") } else { text.to_string() };
                 c.fail(sink, &msg);
             } else {
                 c.set_final(sink, text);
@@ -229,7 +262,12 @@ mod tests {
         assert!(ww.args.windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]));
         let mut req = request(Tier::FullAccess);
         req.effort = Effort::Max;
-        req.mcp_servers = vec![McpServerSpec { name: "hufu".into(), command: "hufu".into(), args: vec!["mcp".into()], env: Default::default() }];
+        req.mcp_servers = vec![McpServerSpec {
+            name: "hufu".into(),
+            command: "hufu".into(),
+            args: vec!["mcp".into()],
+            env: Default::default(),
+        }];
         let full = ClaudeCli.plan(&p, &req).unwrap();
         assert!(full.args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(full.args.windows(2).any(|w| w == ["--effort", "max"]));
@@ -263,7 +301,11 @@ mod tests {
     fn not_logged_in_is_auth_required() {
         let sink = Memory::default();
         let mut c = Collected::default();
-        parse_line(&mut c, &sink, r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","session_id":"s"}"#);
+        parse_line(
+            &mut c,
+            &sink,
+            r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","session_id":"s"}"#,
+        );
         let out = c.outcome(&sink, ended(1), &request(Tier::ReadOnly), true, "sign in");
         assert_eq!(out.reason.as_deref(), Some(hufu_contract::reason::AUTH_REQUIRED));
     }

@@ -37,7 +37,11 @@ pub fn table(headers: &[&str], rows: &[Vec<String>]) {
 
 pub fn clip(text: &str, max: usize) -> String {
     let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one.chars().count() > max { format!("{}…", one.chars().take(max.saturating_sub(1)).collect::<String>()) } else { one }
+    if one.chars().count() > max {
+        format!("{}…", one.chars().take(max.saturating_sub(1)).collect::<String>())
+    } else {
+        one
+    }
 }
 
 /// The process exit code that reports how a job ended.
@@ -65,7 +69,14 @@ pub fn job_row(j: &JobState) -> Vec<String> {
         _ => j.title.clone(),
     };
     let agent = if j.agent == j.profile { j.agent.clone() } else { format!("{}→{}", j.agent, j.profile) };
-    vec![j.id.clone(), state, if j.verdict == Verdict::Unchecked { "-".into() } else { j.verdict.as_str().into() }, agent, fmt_duration(j.elapsed_s()), clip(&what, 90)]
+    vec![
+        j.id.clone(),
+        state,
+        if j.verdict == Verdict::Unchecked { "-".into() } else { j.verdict.as_str().into() },
+        agent,
+        fmt_duration(j.elapsed_s()),
+        clip(&what, 90),
+    ]
 }
 
 pub fn jobs(list: &[JobState]) {
@@ -79,7 +90,13 @@ pub fn jobs(list: &[JobState]) {
 
 pub fn job(j: &JobState) {
     println!("{}  {}  {}", j.id, j.state.as_str(), j.title);
-    println!("  agent       {} (profile {}, adapter {}{})", j.agent, j.profile, j.adapter, j.agent_version.as_ref().map(|v| format!(", {v}")).unwrap_or_default());
+    println!(
+        "  agent       {} (profile {}, adapter {}{})",
+        j.agent,
+        j.profile,
+        j.adapter,
+        j.agent_version.as_ref().map(|v| format!(", {v}")).unwrap_or_default()
+    );
     println!("  permission  {}", j.permission);
     println!("  workspace   {}", j.workspace.as_ref().map(|w| w.path.clone()).unwrap_or_else(|| j.cwd.clone()));
     if let Some(branch) = j.workspace.as_ref().and_then(|w| w.branch.as_ref()) {
@@ -104,9 +121,15 @@ pub fn job(j: &JobState) {
 }
 
 pub fn result(r: &JobResult, max_chars: Option<usize>) {
-    let verdict = if r.verdict == Verdict::Unchecked { String::new() } else { format!("  verdict: {}", r.verdict.as_str()) };
+    let verdict =
+        if r.verdict == Verdict::Unchecked { String::new() } else { format!("  verdict: {}", r.verdict.as_str()) };
     println!("{}  {}{}  {}", r.job, r.state.as_str(), verdict, r.title);
-    let mut facts = vec![format!("agent {} ({}{})", r.agent.profile, r.agent.adapter, r.agent.version.as_ref().map(|v| format!(", {v}")).unwrap_or_default())];
+    let mut facts = vec![format!(
+        "agent {} ({}{})",
+        r.agent.profile,
+        r.agent.adapter,
+        r.agent.version.as_ref().map(|v| format!(", {v}")).unwrap_or_default()
+    )];
     if let Some(account) = &r.agent.account {
         facts.push(format!("account {account}"));
     }
@@ -158,7 +181,13 @@ pub fn result(r: &JobResult, max_chars: Option<usize>) {
     if !r.tally.is_empty() {
         println!("\n--- tally ---");
         for t in &r.tally {
-            println!("{} {} {}{}", if t.passed { "pass" } else { "FAIL" }, t.check, t.description, if t.detail.is_empty() { String::new() } else { format!("\n     {}", t.detail) });
+            println!(
+                "{} {} {}{}",
+                if t.passed { "pass" } else { "FAIL" },
+                t.check,
+                t.description,
+                if t.detail.is_empty() { String::new() } else { format!("\n     {}", t.detail) }
+            );
         }
     }
     if let Some(session) = r.session.as_ref().filter(|s| s.resumable) {
@@ -178,8 +207,13 @@ pub fn agents(list: &[AgentView], probed: bool) {
             },
             a.account.clone().or(a.model.clone()).unwrap_or_else(|| "-".into()),
             caps.map(|c| tier_list(&c.permission_tiers)).unwrap_or_else(|| "-".into()),
-            caps.map(|c| if c.checked_at_runtime { "per session".to_string() } else { effort_list(&c.efforts) }).unwrap_or_else(|| "-".into()),
-            if a.roles.is_empty() { if a.builtin { "(preset)".to_string() } else { "-".into() } } else { a.roles.join(",") },
+            caps.map(|c| if c.checked_at_runtime { "per session".to_string() } else { effort_list(&c.efforts) })
+                .unwrap_or_else(|| "-".into()),
+            if a.roles.is_empty() {
+                if a.builtin { "(preset)".to_string() } else { "-".into() }
+            } else {
+                a.roles.join(",")
+            },
         ];
         if probed {
             row.push(match &a.probe {
@@ -204,8 +238,21 @@ pub fn agents(list: &[AgentView], probed: bool) {
 pub fn doctor(r: &DoctorReport) {
     println!("hufu {}  ({})", r.version, r.exe);
     println!("home     {}", r.home);
-    println!("config   {}", if r.config_files.is_empty() { "none yet (built-in presets only)".to_string() } else { r.config_files.join(", ") });
-    println!("daemon   {}", r.daemon.as_ref().map(|d| format!("running (pid {})", d.pid)).unwrap_or_else(|| "not running (optional)".into()));
+    println!(
+        "config   {}",
+        if r.config_files.is_empty() {
+            "none yet (built-in presets only)".to_string()
+        } else {
+            r.config_files.join(", ")
+        }
+    );
+    println!(
+        "daemon   {}",
+        r.daemon
+            .as_ref()
+            .map(|d| format!("running (pid {})", d.pid))
+            .unwrap_or_else(|| "not running (optional)".into())
+    );
     println!("jobs     {} running, {} queued", r.running_jobs, r.queued_jobs);
     println!("advisor  {}", r.advisor.clone().unwrap_or_else(|| "not set".into()));
     println!("executors  {}", if r.executors.is_empty() { "not set".to_string() } else { r.executors.join(", ") });
@@ -220,7 +267,11 @@ pub fn doctor(r: &DoctorReport) {
                 p.name.clone(),
                 p.adapter.clone(),
                 p.account.clone().unwrap_or_else(|| "-".into()),
-                if p.installed { p.version.clone().unwrap_or_else(|| "installed".into()) } else { "not installed".into() },
+                if p.installed {
+                    p.version.clone().unwrap_or_else(|| "installed".into())
+                } else {
+                    "not installed".into()
+                },
                 match (p.installed, p.authenticated) {
                     (false, _) => "-".into(),
                     (_, Some(true)) => "yes".into(),
@@ -272,7 +323,20 @@ pub fn mission(m: &Mission) {
     }
     if !m.tasks.is_empty() {
         println!();
-        let rows: Vec<Vec<String>> = m.tasks.iter().map(|t| vec![t.id.clone(), t.state.as_str().into(), t.agent.clone(), t.rounds.to_string(), t.jobs.last().cloned().unwrap_or_else(|| "-".into()), clip(&t.title, 60)]).collect();
+        let rows: Vec<Vec<String>> = m
+            .tasks
+            .iter()
+            .map(|t| {
+                vec![
+                    t.id.clone(),
+                    t.state.as_str().into(),
+                    t.agent.clone(),
+                    t.rounds.to_string(),
+                    t.jobs.last().cloned().unwrap_or_else(|| "-".into()),
+                    clip(&t.title, 60),
+                ]
+            })
+            .collect();
         table(&["TASK", "STATE", "AGENT", "ROUNDS", "LAST JOB", "TITLE"], &rows);
     }
 }

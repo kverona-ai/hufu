@@ -22,7 +22,8 @@ fn a_fresh_machine_works_with_presets_and_init_writes_a_first_file() {
     let env = fresh("init");
     // Without any file there are presets for every supported agent.
     let (_, agents) = env.json(&["agents"]);
-    let names: Vec<String> = agents["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
+    let names: Vec<String> =
+        agents["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
     for preset in ["codex", "agy", "cursor", "claude", "kimi", "pi", "kimi-acp", "cursor-acp"] {
         assert!(names.contains(&preset.to_string()), "preset `{preset}` is missing: {names:?}");
     }
@@ -40,7 +41,11 @@ fn a_fresh_machine_works_with_presets_and_init_writes_a_first_file() {
     env.hufu(&["config", "set", "defaults.timeout", "45m"]).expect(0);
     assert_eq!(env.json(&["init", "--force"]).1["action"], "replaced");
     assert_eq!(env.hufu(&["config", "get", "defaults.timeout"]).stdout.trim(), "30m", "a forced init starts over");
-    let backups = std::fs::read_dir(&env.home).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains("config.yaml.")).count();
+    let backups = std::fs::read_dir(&env.home)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().contains("config.yaml."))
+        .count();
     assert!(backups >= 1, "a replaced configuration must leave a backup");
 }
 
@@ -99,12 +104,20 @@ fn configuration_can_be_read_and_changed_from_the_command_line() {
     assert_eq!(env.hufu_in(&env.root, &["config", "get", "defaults.timeout"]).stdout.trim(), "30m");
     let nested = env.work.join("deep").join("er");
     std::fs::create_dir_all(&nested).unwrap();
-    assert_eq!(env.hufu_in(&nested, &["config", "get", "defaults.timeout"]).stdout.trim(), "5m", "the project file is found from a sub-directory");
+    assert_eq!(
+        env.hufu_in(&nested, &["config", "get", "defaults.timeout"]).stdout.trim(),
+        "5m",
+        "the project file is found from a sub-directory"
+    );
     let (_, paths) = env.json(&["config", "path"]);
     assert!(paths["project"].as_str().unwrap().ends_with("config.yaml"));
 
     // A broken file is reported with every problem, and nothing runs on it.
-    std::fs::write(env.home.join("config.yaml"), "version: 1\nprofiles:\n  x: {adapter: nope}\nroles: {advisor: y}\nlimits: {max_concurrent_jobs: 0}\n").unwrap();
+    std::fs::write(
+        env.home.join("config.yaml"),
+        "version: 1\nprofiles:\n  x: {adapter: nope}\nroles: {advisor: y}\nlimits: {max_concurrent_jobs: 0}\n",
+    )
+    .unwrap();
     let r = env.hufu(&["run", "-a", "codex", "x"]);
     assert_eq!(r.code, 2, "{}", r.stderr);
     for needle in ["nope", "roles.advisor", "max_concurrent_jobs"] {
@@ -121,10 +134,68 @@ fn several_accounts_of_one_agent_become_profiles_and_a_pool() {
     let env = Env::new("profiles");
     let fake_codex = format!("{HUFU},__fake-agent,codex");
     let home_a = env.root.join("codex-work").display().to_string();
-    env.hufu(&["profile", "add", "codex-work", "--adapter", "codex-cli", "--command", &fake_codex, "--account", "work", "--home", &home_a, "--model", "gpt-big", "--effort", "high"]).expect(0);
-    env.hufu(&["profile", "add", "codex-me", "--adapter", "codex-cli", "--command", &fake_codex, "--account", "me", "--env-from", "OPENAI_API_KEY=MY_OTHER_KEY", "--var", "HUFU_FAKE_SCENARIO=ok"]).expect(0);
-    env.hufu(&["profile", "add", "api", "--adapter", "pi", "--provider", "openrouter", "--model", "some/model", "--env", "OPENROUTER_API_KEY", "--description", "An API key instead of a subscription"]).expect(0);
-    env.hufu(&["pool", "add", "codex-any", "--member", "codex-work,codex-me", "--strategy", "least-busy", "--description", "Either Codex account"]).expect(0);
+    env.hufu(&[
+        "profile",
+        "add",
+        "codex-work",
+        "--adapter",
+        "codex-cli",
+        "--command",
+        &fake_codex,
+        "--account",
+        "work",
+        "--home",
+        &home_a,
+        "--model",
+        "gpt-big",
+        "--effort",
+        "high",
+    ])
+    .expect(0);
+    env.hufu(&[
+        "profile",
+        "add",
+        "codex-me",
+        "--adapter",
+        "codex-cli",
+        "--command",
+        &fake_codex,
+        "--account",
+        "me",
+        "--env-from",
+        "OPENAI_API_KEY=MY_OTHER_KEY",
+        "--var",
+        "HUFU_FAKE_SCENARIO=ok",
+    ])
+    .expect(0);
+    env.hufu(&[
+        "profile",
+        "add",
+        "api",
+        "--adapter",
+        "pi",
+        "--provider",
+        "openrouter",
+        "--model",
+        "some/model",
+        "--env",
+        "OPENROUTER_API_KEY",
+        "--description",
+        "An API key instead of a subscription",
+    ])
+    .expect(0);
+    env.hufu(&[
+        "pool",
+        "add",
+        "codex-any",
+        "--member",
+        "codex-work,codex-me",
+        "--strategy",
+        "least-busy",
+        "--description",
+        "Either Codex account",
+    ])
+    .expect(0);
     env.hufu(&["config", "set", "roles.executors", "[codex-any, api, agy]"]).expect(0);
 
     // A project file may build on what the user-wide file defines.
@@ -166,7 +237,10 @@ fn several_accounts_of_one_agent_become_profiles_and_a_pool() {
     // `set` changes some fields and keeps the rest; a preset is copied into the file on first change.
     env.hufu(&["profile", "set", "codex-work", "--model", "gpt-small"]).expect(0);
     let (_, shown) = env.json(&["profile", "show", "codex-work"]);
-    assert_eq!((shown["profile"]["model"].as_str(), shown["profile"]["account"].as_str()), (Some("gpt-small"), Some("work")));
+    assert_eq!(
+        (shown["profile"]["model"].as_str(), shown["profile"]["account"].as_str()),
+        (Some("gpt-small"), Some("work"))
+    );
     env.hufu(&["profile", "set", "kimi-acp", "--verified"]).expect(0);
     assert_eq!(env.json(&["profile", "show", "kimi-acp"]).1["profile"]["permission_requests"], "verified");
     assert_eq!(env.json(&["profile", "show", "kimi-acp"]).1["profile"]["command"], json!(["kimi", "acp"]));
@@ -174,10 +248,22 @@ fn several_accounts_of_one_agent_become_profiles_and_a_pool() {
     refused(&env, &["profile", "add", "x"], "--adapter");
     refused(&env, &["profile", "add", "x", "--adapter", "smoke-signals"], "smoke-signals");
     refused(&env, &["profile", "add", "x", "--adapter", "acp"], "command");
-    refused(&env, &["profile", "add", "x", "--adapter", "codex-cli", "--permission", "full-access"], "allow_full_access");
-    refused(&env, &["profile", "add", "x", "--adapter", "codex-cli", "--var", "OPENAI_API_KEY=sk-not-a-real-key-000000"], "secret");
+    refused(
+        &env,
+        &["profile", "add", "x", "--adapter", "codex-cli", "--permission", "full-access"],
+        "allow_full_access",
+    );
+    refused(
+        &env,
+        &["profile", "add", "x", "--adapter", "codex-cli", "--var", "OPENAI_API_KEY=sk-not-a-real-key-000000"],
+        "secret",
+    );
     refused(&env, &["profile", "add", "x", "--adapter", "codex-cli", "--env-from", "broken"], "env-from");
-    refused(&env, &["profile", "add", "x", "--adapter", "external", "--command", "some-adapter", "--home", "/somewhere"], "home");
+    refused(
+        &env,
+        &["profile", "add", "x", "--adapter", "external", "--command", "some-adapter", "--home", "/somewhere"],
+        "home",
+    );
     refused(&env, &["profile", "set", "nobody", "--model", "m"], "nobody");
     refused(&env, &["profile", "add", "codex-any", "--adapter", "codex-cli"], "pool");
     refused(&env, &["pool", "add", "p", "--member", "ghost"], "ghost");
@@ -199,43 +285,74 @@ fn hufu_registers_itself_with_other_agents() {
     let mut env = Env::new("setup");
     let root = env.root.clone();
     let dir = |name: &str| root.join(name);
-    for (var, name) in [("CURSOR_CONFIG_DIR", "cursor"), ("CODEX_HOME", "codex"), ("KIMI_CODE_HOME", "kimi"), ("HUFU_AGY_CONFIG_DIR", "agy")] {
+    for (var, name) in [
+        ("CURSOR_CONFIG_DIR", "cursor"),
+        ("CODEX_HOME", "codex"),
+        ("KIMI_CODE_HOME", "kimi"),
+        ("HUFU_AGY_CONFIG_DIR", "agy"),
+    ] {
         let path = dir(name).display().to_string();
         env.set(var, &path);
     }
     // Existing settings of the user must survive.
     std::fs::create_dir_all(dir("cursor")).unwrap();
-    std::fs::write(dir("cursor").join("mcp.json"), r#"{"mcpServers": {"other": {"command": "other-server"}}, "keep": true}"#).unwrap();
+    std::fs::write(
+        dir("cursor").join("mcp.json"),
+        r#"{"mcpServers": {"other": {"command": "other-server"}}, "keep": true}"#,
+    )
+    .unwrap();
     std::fs::create_dir_all(dir("codex")).unwrap();
-    std::fs::write(dir("codex").join("config.toml"), "model = \"gpt-x\"\n\n[mcp_servers.other]\ncommand = \"other\"\n").unwrap();
+    std::fs::write(dir("codex").join("config.toml"), "model = \"gpt-x\"\n\n[mcp_servers.other]\ncommand = \"other\"\n")
+        .unwrap();
 
     let hosts = ["--agent", "cursor", "--agent", "codex", "--agent", "kimi", "--agent", "agy"];
-    let with = |extra: &[&'static str]| -> Vec<&'static str> { ["setup"].iter().chain(hosts.iter()).chain(extra.iter()).copied().collect() };
+    let with = |extra: &[&'static str]| -> Vec<&'static str> {
+        ["setup"].iter().chain(hosts.iter()).chain(extra.iter()).copied().collect()
+    };
 
     // `--print` shows what would happen and writes nothing.
     let printed = env.hufu(&with(&["--print"])).expect(0).stdout;
     assert!(printed.contains("mcp_servers.hufu") && printed.contains("mcpServers"), "{printed}");
-    assert!(!dir("kimi").exists() && !std::fs::read_to_string(dir("cursor").join("mcp.json")).unwrap().contains("hufu"));
+    assert!(
+        !dir("kimi").exists() && !std::fs::read_to_string(dir("cursor").join("mcp.json")).unwrap().contains("hufu")
+    );
 
     let (code, done) = env.json(&with(&[]));
     assert_eq!(code, 0, "{done}");
-    let actions: Vec<(String, String)> = done["actions"].as_array().unwrap().iter().map(|a| (a["host"].as_str().unwrap().to_string(), a["action"].as_str().unwrap().to_string())).collect();
+    let actions: Vec<(String, String)> = done["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| (a["host"].as_str().unwrap().to_string(), a["action"].as_str().unwrap().to_string()))
+        .collect();
     assert_eq!(actions.len(), 4);
     assert!(actions.iter().all(|(_, action)| action == "registered"), "{actions:?}");
 
-    let cursor: Value = serde_json::from_str(&std::fs::read_to_string(dir("cursor").join("mcp.json")).unwrap()).unwrap();
+    let cursor: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir("cursor").join("mcp.json")).unwrap()).unwrap();
     assert_eq!(cursor["mcpServers"]["hufu"]["args"], json!(["mcp"]));
     assert!(std::path::Path::new(cursor["mcpServers"]["hufu"]["command"].as_str().unwrap()).is_absolute());
     assert_eq!(cursor["mcpServers"]["other"]["command"], "other-server");
     assert_eq!(cursor["keep"], true);
     assert!(dir("cursor").join("mcp.json.hufu-bak").exists(), "the original file is kept as a backup");
     let codex = std::fs::read_to_string(dir("codex").join("config.toml")).unwrap();
-    assert!(codex.contains("model = \"gpt-x\"") && codex.contains("[mcp_servers.other]") && codex.contains("[mcp_servers.hufu]"), "{codex}");
+    assert!(
+        codex.contains("model = \"gpt-x\"")
+            && codex.contains("[mcp_servers.other]")
+            && codex.contains("[mcp_servers.hufu]"),
+        "{codex}"
+    );
     assert!(dir("kimi").join("mcp.json").exists() && dir("agy").join("mcp_config.json").exists());
 
     // The registered command really is an MCP server.
     let command = cursor["mcpServers"]["hufu"]["command"].as_str().unwrap();
-    let mut server = std::process::Command::new(command).arg("mcp").env("HUFU_HOME", &env.home).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let mut server = std::process::Command::new(command)
+        .arg("mcp")
+        .env("HUFU_HOME", &env.home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
     {
         use std::io::Write;
         let stdin = server.stdin.as_mut().unwrap();
@@ -249,7 +366,8 @@ fn hufu_registers_itself_with_other_agents() {
     assert!(again["actions"].as_array().unwrap().iter().all(|a| a["action"] == "unchanged"), "{again}");
     let (_, removed) = env.json(&with(&["--remove"]));
     assert!(removed["actions"].as_array().unwrap().iter().all(|a| a["action"] == "removed"), "{removed}");
-    let cursor: Value = serde_json::from_str(&std::fs::read_to_string(dir("cursor").join("mcp.json")).unwrap()).unwrap();
+    let cursor: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir("cursor").join("mcp.json")).unwrap()).unwrap();
     assert!(cursor["mcpServers"].get("hufu").is_none() && cursor["mcpServers"]["other"].is_object());
     let codex = std::fs::read_to_string(dir("codex").join("config.toml")).unwrap();
     assert!(!codex.contains("hufu") && codex.contains("[mcp_servers.other]"), "{codex}");
@@ -275,12 +393,20 @@ fn hufu_registers_itself_with_other_agents() {
     let mcp: Value = serde_json::from_str(&std::fs::read_to_string(env.work.join(".mcp.json")).unwrap()).unwrap();
     assert_eq!(mcp["mcpServers"]["hufu"]["args"], json!(["mcp"]));
     let skill = std::fs::read_to_string(env.work.join(".claude").join("skills").join("hufu").join("SKILL.md")).unwrap();
-    assert!(skill.starts_with("---") && skill.contains("hufu_submit"), "the skill needs front matter and must name the tools");
+    assert!(
+        skill.starts_with("---") && skill.contains("hufu_submit"),
+        "the skill needs front matter and must name the tools"
+    );
     assert!(env.work.join(".cursor").join("mcp.json").exists());
     env.hufu(&["setup", "--agent", "claude", "--agent", "cursor", "--project", "--remove"]).expect(0);
     assert!(!env.work.join(".claude").join("skills").join("hufu").join("SKILL.md").exists());
     // For Claude Code's user scope, `--print` shows the one command instead of running it.
-    assert!(env.hufu(&["setup", "--agent", "claude", "--print"]).expect(0).stdout.contains("claude mcp add --scope user hufu"));
+    assert!(
+        env.hufu(&["setup", "--agent", "claude", "--print"])
+            .expect(0)
+            .stdout
+            .contains("claude mcp add --scope user hufu")
+    );
 }
 
 #[test]
@@ -292,7 +418,15 @@ fn doctor_reports_the_state_of_the_installation() {
     }}));
     let (code, doc) = env.json(&["doctor"]);
     assert_eq!(code, 0, "{doc}");
-    let profile = |name: &str| doc["profiles"].as_array().unwrap().iter().find(|p| p["name"] == name).unwrap_or_else(|| panic!("no {name} in {doc}")).clone();
+    let profile = |name: &str| {
+        doc["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {doc}"))
+            .clone()
+    };
     assert_eq!(profile("codex")["installed"], true);
     assert_eq!(profile("missing")["installed"], false);
     assert_eq!(strings(&profile("logged-out")["missing_env"]), vec!["HUFU_TEST_KEY_THAT_IS_NOT_SET"]);
@@ -306,5 +440,8 @@ fn doctor_reports_the_state_of_the_installation() {
     assert_eq!(code, 0, "{doc}");
     let tests = doc["self_test"].as_array().unwrap();
     assert!(tests.len() >= 3 && tests.iter().all(|t| t["ok"] == true), "{tests:?}");
-    assert!(env.json(&["status", "--all"]).1["jobs"].as_array().unwrap().is_empty(), "the self-test must not leave jobs in the user's home");
+    assert!(
+        env.json(&["status", "--all"]).1["jobs"].as_array().unwrap().is_empty(),
+        "the self-test must not leave jobs in the user's home"
+    );
 }

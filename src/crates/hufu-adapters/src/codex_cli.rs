@@ -4,7 +4,7 @@
 //! 2026-11-12. See `doc/research/agent-landscape.md`.
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, Profile, ProbeResult,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
     RawStream, RunOutcome, RunRequest, StructuredOutput, Tier,
 };
 use serde_json::Value;
@@ -14,8 +14,16 @@ use crate::common::{self, Collected};
 const DEFAULT: &[&str] = &["codex"];
 const INSTALL: &str = "install Codex CLI: `npm install -g @openai/codex` or `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, then run `codex login`";
 const FORBIDDEN: &[&str] = &[
-    "--sandbox", "-s", "--dangerously-bypass-approvals-and-sandbox", "--yolo", "--full-auto", "--approve-for-me",
-    "--not-so-yolo", "--ask-for-approval", "-a", "--add-dir",
+    "--sandbox",
+    "-s",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--yolo",
+    "--full-auto",
+    "--approve-for-me",
+    "--not-so-yolo",
+    "--ask-for-approval",
+    "-a",
+    "--add-dir",
 ];
 
 pub struct CodexCli;
@@ -28,7 +36,11 @@ fn effort_value(effort: &Effort) -> Result<Option<String>, AdapterError> {
         Effort::High => Some("high".into()),
         Effort::Max => Some("max".into()),
         Effort::Native(v) => Some(v.clone()),
-        Effort::Off => return Err(AdapterError("Codex has no `off` effort level; accepted: default, low, medium, high, max, native:<value>".into())),
+        Effort::Off => {
+            return Err(AdapterError(
+                "Codex has no `off` effort level; accepted: default, low, medium, high, max, native:<value>".into(),
+            ));
+        }
     })
 }
 
@@ -60,7 +72,8 @@ impl Adapter for CodexCli {
                 probe.authenticated = Some(true);
                 probe.detail = Some("saved login found".into());
             } else {
-                probe.detail = Some("no saved login file found; if Codex keeps its login in the OS keyring this is fine".into());
+                probe.detail =
+                    Some("no saved login file found; if Codex keeps its login in the OS keyring this is fine".into());
                 probe.hint = Some("run `codex login` if jobs fail with auth_required".into());
             }
         }
@@ -80,7 +93,10 @@ impl Adapter for CodexCli {
             reports_denials: true,
             accepts_mcp_servers: true,
             provides: Vec::new(),
-            notes: vec!["effort levels beyond `high` depend on the model; `xhigh` and `ultra` are reachable as native:<value>".into()],
+            notes: vec![
+                "effort levels beyond `high` depend on the model; `xhigh` and `ultra` are reachable as native:<value>"
+                    .into(),
+            ],
         }
     }
 
@@ -139,7 +155,10 @@ impl Adapter for CodexCli {
         if let Some(schema) = &req.output_schema {
             let path = req.scratch_dir.join("output-schema.json");
             if let Err(e) = std::fs::write(&path, serde_json::to_vec_pretty(schema).unwrap_or_default()) {
-                return RunOutcome::failed(hufu_contract::reason::INTERNAL, format!("cannot write {}: {e}", path.display()));
+                return RunOutcome::failed(
+                    hufu_contract::reason::INTERNAL,
+                    format!("cannot write {}: {e}", path.display()),
+                );
             }
         }
         // A file left by an earlier attempt must not be taken for this attempt's answer.
@@ -159,7 +178,9 @@ impl Adapter for CodexCli {
 
 /// Translates one line of `codex exec --json` output.
 pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     let kind = v.get("type").and_then(Value::as_str).unwrap_or("");
     match kind {
         "thread.started" => {
@@ -219,7 +240,11 @@ fn parse_item(c: &mut Collected, sink: &dyn EventSink, item: &Value, completed: 
             let declined = text("status") == "declined";
             let blocked = text("status") == "failed" && common::looks_like_denial(output);
             if declined || blocked {
-                let detail = if declined { "declined by the approval policy".to_string() } else { hufu_contract::proc::tail(output, 300) };
+                let detail = if declined {
+                    "declined by the approval policy".to_string()
+                } else {
+                    hufu_contract::proc::tail(output, 300)
+                };
                 c.deny(sink, command, "execute", &detail);
             }
         }

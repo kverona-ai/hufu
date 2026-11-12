@@ -175,7 +175,9 @@ pub fn pid_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
         const STILL_ACTIVE: u32 = 259;
         // SAFETY: the handle is checked before use and closed exactly once.
         unsafe {
@@ -223,7 +225,9 @@ fn is_zombie(pid: u32) -> bool {
 /// group is not reached by a signal to its parent's group, so the forced path looks it up.
 #[cfg(unix)]
 fn descendants(pid: u32) -> Vec<u32> {
-    let Ok(out) = Command::new("ps").args(["-A", "-o", "pid=,ppid="]).stdin(Stdio::null()).stderr(Stdio::null()).output() else {
+    let Ok(out) =
+        Command::new("ps").args(["-A", "-o", "pid=,ppid="]).stdin(Stdio::null()).stderr(Stdio::null()).output()
+    else {
         return Vec::new();
     };
     let table: Vec<(u32, u32)> = String::from_utf8_lossy(&out.stdout)
@@ -295,13 +299,51 @@ pub fn kill_grace() -> Duration {
 // ---------------------------------------------------------------------------------------------
 
 const BASE_ENV: &[&str] = &[
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "TEMP", "TMP",
-    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
-    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "TERM",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
     // Windows
-    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "USERNAME", "USERDOMAIN",
-    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432",
-    "COMMONPROGRAMFILES", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "USERPROFILE",
+    "USERNAME",
+    "USERDOMAIN",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMW6432",
+    "COMMONPROGRAMFILES",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "OS",
     // Hufu's own home must reach helper processes the agent starts (the capability MCP server).
     "HUFU_HOME",
 ];
@@ -311,7 +353,9 @@ const BASE_ENV: &[&str] = &[
 pub fn agent_env(extra: &[String]) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for (key, value) in std::env::vars_os() {
-        let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else { continue };
+        let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else {
+            continue;
+        };
         let upper = key.to_ascii_uppercase();
         let wanted = BASE_ENV.contains(&upper.as_str())
             || upper.starts_with("LC_")
@@ -473,7 +517,12 @@ pub enum Step {
 impl Streamed {
     /// Starts `cmd` in its own process group with piped output. When `keep_stdin` is false the
     /// given text (if any) is written to stdin, which is then closed.
-    pub fn spawn(mut cmd: Command, stdin: Option<&str>, keep_stdin: bool, sink: &dyn EventSink) -> Result<Streamed, String> {
+    pub fn spawn(
+        mut cmd: Command,
+        stdin: Option<&str>,
+        keep_stdin: bool,
+        sink: &dyn EventSink,
+    ) -> Result<Streamed, String> {
         cmd.stdin(if stdin.is_some() || keep_stdin { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -577,7 +626,8 @@ impl Streamed {
                     self.stderr_tail.push('\n');
                     if self.stderr_tail.len() > 8192 {
                         let cut = self.stderr_tail.len() - 4096;
-                        let cut = (cut..self.stderr_tail.len()).find(|i| self.stderr_tail.is_char_boundary(*i)).unwrap_or(0);
+                        let cut =
+                            (cut..self.stderr_tail.len()).find(|i| self.stderr_tail.is_char_boundary(*i)).unwrap_or(0);
                         self.stderr_tail.drain(..cut);
                     }
                 }
@@ -638,7 +688,9 @@ pub fn run_streamed(
 ) -> StreamResult {
     let mut proc = match Streamed::spawn(cmd, stdin, false, sink) {
         Ok(p) => p,
-        Err(e) => return StreamResult { spawn_error: Some(e), ..StreamResult::default() },
+        Err(e) => {
+            return StreamResult { spawn_error: Some(e), ..StreamResult::default() };
+        }
     };
     loop {
         if cancel.is_cancelled() && !proc.stop_requested() {
@@ -696,7 +748,9 @@ mod tests {
         let sink = Collect::default();
         let cancel = CancelToken::new();
         let mut seen = Vec::new();
-        let r = run_streamed(shell_command("echo one&& echo two"), None, &sink, &cancel, &mut |_, l| seen.push(l.to_string()));
+        let r = run_streamed(shell_command("echo one&& echo two"), None, &sink, &cancel, &mut |_, l| {
+            seen.push(l.to_string())
+        });
         assert_eq!(r.exit_code, Some(0));
         assert_eq!(seen.iter().map(|s| s.trim()).collect::<Vec<_>>(), ["one", "two"]);
         assert_eq!(sink.0.lock().unwrap().len(), 2);

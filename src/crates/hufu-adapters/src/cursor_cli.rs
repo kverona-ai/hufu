@@ -1,7 +1,7 @@
 //! Cursor CLI (`agent -p --output-format stream-json`).
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventSink, LaunchPlan, Profile, ProbeResult, RawStream,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventSink, LaunchPlan, ProbeResult, Profile, RawStream,
     RunOutcome, RunRequest, StructuredOutput, Tier, json::instruct_json,
 };
 use serde_json::Value;
@@ -99,7 +99,9 @@ impl Adapter for CursorCli {
             None => req.prompt.clone(),
         });
         if req.permission == Tier::WorkspaceWrite {
-            plan.notes.push("print mode without --force: workspace edits are applied, other actions are rejected by Cursor".into());
+            plan.notes.push(
+                "print mode without --force: workspace edits are applied, other actions are rejected by Cursor".into(),
+            );
         }
         Ok(plan)
     }
@@ -120,7 +122,9 @@ impl Adapter for CursorCli {
 }
 
 pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     if let Some(id) = v.get("session_id").and_then(Value::as_str).filter(|x| !x.is_empty()) {
         c.session = Some(id.to_string());
     }
@@ -136,9 +140,14 @@ pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
         "tool_call" => {
             let id = v.get("call_id").and_then(Value::as_str).unwrap_or("call");
             let completed = v.get("subtype").and_then(Value::as_str) == Some("completed");
-            let Some((name, body)) = v.get("tool_call").and_then(Value::as_object).and_then(|o| o.iter().next()) else { return };
+            let Some((name, body)) = v.get("tool_call").and_then(Value::as_object).and_then(|o| o.iter().next()) else {
+                return;
+            };
             let (tool, args) = if name == "function" {
-                (body.get("name").and_then(Value::as_str).unwrap_or("function").to_string(), body.get("arguments").cloned().unwrap_or(Value::Null))
+                (
+                    body.get("name").and_then(Value::as_str).unwrap_or("function").to_string(),
+                    body.get("arguments").cloned().unwrap_or(Value::Null),
+                )
             } else {
                 (name.trim_end_matches("ToolCall").to_string(), body.get("args").cloned().unwrap_or(Value::Null))
             };

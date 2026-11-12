@@ -45,7 +45,12 @@ const PLAIN_LIMIT: usize = 20_000;
 fn stamp_of(path: &Path) -> String {
     match std::fs::metadata(path) {
         Ok(m) => {
-            let modified = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+            let modified = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
             format!("{}:{modified}", m.len())
         }
         Err(_) => "gone".into(),
@@ -152,13 +157,18 @@ pub struct Worktree {
 
 /// Creates `hufu/<job>` at the current commit, checked out in a worktree under `$HUFU_HOME`.
 pub fn create_worktree(home: &Home, cwd: &Path, job: &str) -> Result<Worktree> {
-    let repo = repo_root(cwd).ok_or_else(|| HufuError::usage(format!("{} is not inside a git repository, which `isolation: worktree` needs", cwd.display())))?;
-    let base = head(&repo).ok_or_else(|| HufuError::usage("the repository has no commit yet; `isolation: worktree` needs one to branch from"))?;
+    let repo = repo_root(cwd).ok_or_else(|| {
+        HufuError::usage(format!("{} is not inside a git repository, which `isolation: worktree` needs", cwd.display()))
+    })?;
+    let base = head(&repo).ok_or_else(|| {
+        HufuError::usage("the repository has no commit yet; `isolation: worktree` needs one to branch from")
+    })?;
     let path = home.worktrees().join(job);
     std::fs::create_dir_all(home.worktrees()).map_err(|e| HufuError::internal(e.to_string()))?;
     let branch = format!("hufu/{job}");
     let target = path.display().to_string();
-    let out = git(&repo, &["worktree", "add", "-b", &branch, &target, &base]).ok_or_else(|| HufuError::internal("git could not be started"))?;
+    let out = git(&repo, &["worktree", "add", "-b", &branch, &target, &base])
+        .ok_or_else(|| HufuError::internal("git could not be started"))?;
     if !out.ok() {
         return Err(HufuError::internal(format!("git worktree add failed: {}", proc::tail(&out.stderr, 500))));
     }
@@ -224,7 +234,8 @@ mod tests {
         std::fs::write(dir.join("src/a.txt"), "one\n").unwrap();
         std::fs::write(dir.join("dirty.txt"), "already dirty\n").unwrap();
         git(&dir, &["add", "src/a.txt"])?;
-        let done = git(&dir, &["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init"])?;
+        let done =
+            git(&dir, &["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init"])?;
         done.ok().then_some(dir)
     }
 
@@ -236,7 +247,11 @@ mod tests {
         std::fs::write(dir.join("src/a.txt"), "two\n").unwrap();
         std::fs::write(dir.join("new file.txt"), "x").unwrap();
         let after = snapshot(&dir).unwrap();
-        assert_eq!(changed(&before, &after), ["new file.txt", "src/a.txt"], "a file that was already dirty and untouched is not reported");
+        assert_eq!(
+            changed(&before, &after),
+            ["new file.txt", "src/a.txt"],
+            "a file that was already dirty and untouched is not reported"
+        );
         assert!(changed(&after, &after).is_empty());
         assert!(snapshot(&std::env::temp_dir().join("hufu-definitely-not-a-repo")).is_none());
         let _ = std::fs::remove_dir_all(&dir);

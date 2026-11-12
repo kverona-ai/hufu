@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use hufu_adapters::Registry;
 use hufu_contract::time::parse_duration;
 use hufu_contract::{Effort, Tier};
-use hufu_core::config::{self, Grant, Home, Isolation, Loaded, ReviewPolicy, RetryPolicy, Route};
+use hufu_core::config::{self, Grant, Home, Isolation, Loaded, RetryPolicy, ReviewPolicy, Route};
 use hufu_core::error::{HufuError, Result, exit};
 use hufu_core::mission::{self, MissionSpec, MissionState};
 use hufu_core::ops::{self, PruneOptions};
@@ -57,11 +57,15 @@ impl App {
 
 fn read_prompt(words: &[String], file: Option<&Path>) -> Result<Option<String>> {
     if let Some(path) = file {
-        return std::fs::read_to_string(path).map(Some).map_err(|e| HufuError::usage(format!("prompt file {}: {e}", path.display())));
+        return std::fs::read_to_string(path)
+            .map(Some)
+            .map_err(|e| HufuError::usage(format!("prompt file {}: {e}", path.display())));
     }
     if words.len() == 1 && words[0] == "-" {
         let mut text = String::new();
-        std::io::stdin().read_to_string(&mut text).map_err(|e| HufuError::usage(format!("cannot read the prompt from stdin: {e}")))?;
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .map_err(|e| HufuError::usage(format!("cannot read the prompt from stdin: {e}")))?;
         return Ok(Some(text));
     }
     Ok((!words.is_empty()).then(|| words.join(" ")))
@@ -74,14 +78,21 @@ fn duration(flag: &str, text: &str) -> Result<Duration> {
 fn pairs(flag: &str, items: &[String]) -> Result<BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
     for item in items {
-        let (k, v) = item.split_once('=').ok_or_else(|| HufuError::usage(format!("{flag} takes KEY=VALUE, got `{item}`")))?;
+        let (k, v) =
+            item.split_once('=').ok_or_else(|| HufuError::usage(format!("{flag} takes KEY=VALUE, got `{item}`")))?;
         out.insert(k.trim().to_string(), v.to_string());
     }
     Ok(out)
 }
 
 pub fn run(args: Cli) -> Result<i32> {
-    let app = App { home: Home::resolve()?, adapters: Registry::builtin(), cwd: std::env::current_dir().map_err(|e| HufuError::internal(format!("cannot read the current directory: {e}")))?, json: args.json };
+    let app = App {
+        home: Home::resolve()?,
+        adapters: Registry::builtin(),
+        cwd: std::env::current_dir()
+            .map_err(|e| HufuError::internal(format!("cannot read the current directory: {e}")))?,
+        json: args.json,
+    };
     match args.command {
         Command::Run(a) => cmd_run(&app, a),
         Command::Status(a) => cmd_status(&app, a),
@@ -95,7 +106,13 @@ pub fn run(args: Cli) -> Result<i32> {
         Command::Prune(a) => cmd_prune(&app, a),
         Command::Mission(c) => cmd_mission(&app, c),
         Command::Mcp(a) => {
-            let server = hufu_mcp::Server { home: app.home.clone(), adapters: &app.adapters, version: VERSION, child_of: a.child_of, cwd: app.cwd.clone() };
+            let server = hufu_mcp::Server {
+                home: app.home.clone(),
+                adapters: &app.adapters,
+                version: VERSION,
+                child_of: a.child_of,
+                cwd: app.cwd.clone(),
+            };
             server.serve().map_err(|e| HufuError::internal(e.to_string()))?;
             Ok(exit::OK)
         }
@@ -115,7 +132,11 @@ pub fn run(args: Cli) -> Result<i32> {
             let loaded = config::load(&app.home, Path::new(&m.cwd))?;
             let start = |home: &Home, id: &str| submit::launch(home, id).map(|_| ());
             let done = mission::run(&app.home, &loaded.config, &app.adapters, &mission, &start)?;
-            Ok(if done.state == MissionState::Succeeded || done.state == MissionState::Paused { exit::OK } else { exit::JOB_FAILED })
+            Ok(if done.state == MissionState::Succeeded || done.state == MissionState::Paused {
+                exit::OK
+            } else {
+                exit::JOB_FAILED
+            })
         }
     }
 }
@@ -127,7 +148,11 @@ pub fn run(args: Cli) -> Result<i32> {
 fn task_from(app: &App, loaded: &Loaded, a: &RunArgs) -> Result<(TaskSpec, PathBuf)> {
     let (mut task, base) = match &a.file {
         Some(path) => {
-            let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+            let dir = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
             (TaskSpec::from_file(path)?, if dir.is_absolute() { dir } else { app.cwd.join(dir) })
         }
         None => (TaskSpec::default(), app.cwd.clone()),
@@ -159,20 +184,30 @@ fn task_from(app: &App, loaded: &Loaded, a: &RunArgs) -> Result<(TaskSpec, PathB
             if p.is_absolute() { p } else { app.cwd.join(p) }.display().to_string()
         });
     }
-    for (target, value) in [(&mut task.model, &a.model), (&mut task.timeout, &a.timeout), (&mut task.inactivity_timeout, &a.inactivity_timeout), (&mut task.title, &a.title)] {
+    for (target, value) in [
+        (&mut task.model, &a.model),
+        (&mut task.timeout, &a.timeout),
+        (&mut task.inactivity_timeout, &a.inactivity_timeout),
+        (&mut task.title, &a.title),
+    ] {
         if value.is_some() {
             *target = value.clone();
         }
     }
     if let Some(schema) = &a.schema {
         let path = hufu_contract::proc::expand_tilde(schema);
-        task.output = Some(OutputSpec { schema: SchemaRef::Path(if path.is_absolute() { path } else { app.cwd.join(path) }.display().to_string()) });
+        task.output = Some(OutputSpec {
+            schema: SchemaRef::Path(if path.is_absolute() { path } else { app.cwd.join(path) }.display().to_string()),
+        });
     }
     for command in &a.accept {
         task.acceptance.push(Check { command: Some(command.clone()), ..Check::default() });
     }
     if !a.allow_path.is_empty() || !a.deny_path.is_empty() {
-        task.acceptance.push(Check { paths: Some(PathRules { allow: a.allow_path.clone(), deny: a.deny_path.clone() }), ..Check::default() });
+        task.acceptance.push(Check {
+            paths: Some(PathRules { allow: a.allow_path.clone(), deny: a.deny_path.clone() }),
+            ..Check::default()
+        });
     }
     if a.strict {
         task.strict_permissions = Some(true);
@@ -180,13 +215,20 @@ fn task_from(app: &App, loaded: &Loaded, a: &RunArgs) -> Result<(TaskSpec, PathB
     task.depends_on.extend(a.depends_on.iter().cloned());
     task.labels.extend(pairs("--label", &a.label)?);
     if let Some(apps) = &a.computer_use {
-        task.grants.push(Grant { capability: capability::COMPUTER_USE.into(), apps: apps.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect() });
+        task.grants.push(Grant {
+            capability: capability::COMPUTER_USE.into(),
+            apps: apps.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        });
     }
     if a.computer_use_agent.is_some() || a.computer_use_route.is_some() {
         let route = match a.computer_use_route.as_deref() {
             Some("dedicated") => Some(Route::Dedicated),
             Some("executor") => Some(Route::Executor),
-            Some(other) => return Err(HufuError::usage(format!("unknown --computer-use-route `{other}`; accepted: dedicated, executor"))),
+            Some(other) => {
+                return Err(HufuError::usage(format!(
+                    "unknown --computer-use-route `{other}`; accepted: dedicated, executor"
+                )));
+            }
             None => None,
         };
         task.computer_use = Some(ComputerUseOverride { route, agent: a.computer_use_agent.clone() });
@@ -213,14 +255,40 @@ fn cmd_run(app: &App, a: RunArgs) -> Result<i32> {
             "computer_use": spec.computer_use, "warnings": spec.warnings, "launch": plan,
         });
         app.out(&doc, || {
-            println!("would run profile `{}` (adapter {}) at {} in {}", spec.profile.name, spec.profile.adapter, spec.permission, spec.cwd.display());
+            println!(
+                "would run profile `{}` (adapter {}) at {} in {}",
+                spec.profile.name,
+                spec.profile.adapter,
+                spec.permission,
+                spec.cwd.display()
+            );
             if !spec.alternates.is_empty() {
-                println!("fails over to: {}", spec.alternates.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
+                println!(
+                    "fails over to: {}",
+                    spec.alternates.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+                );
             }
             if let Some(cu) = &spec.computer_use {
-                println!("computer use: {} via profile `{}` ({}), apps: {}", format!("{:?}", cu.route).to_lowercase(), cu.agent, cu.via, cu.apps.join(", "));
+                println!(
+                    "computer use: {} via profile `{}` ({}), apps: {}",
+                    format!("{:?}", cu.route).to_lowercase(),
+                    cu.agent,
+                    cu.via,
+                    cu.apps.join(", ")
+                );
             }
-            let shown: Vec<String> = plan.args.iter().map(|x| if x.chars().count() > 120 { format!("{}…", x.chars().take(117).collect::<String>()) } else { x.clone() }).map(|x| if x.contains(char::is_whitespace) { format!("{x:?}") } else { x }).collect();
+            let shown: Vec<String> = plan
+                .args
+                .iter()
+                .map(|x| {
+                    if x.chars().count() > 120 {
+                        format!("{}…", x.chars().take(117).collect::<String>())
+                    } else {
+                        x.clone()
+                    }
+                })
+                .map(|x| if x.contains(char::is_whitespace) { format!("{x:?}") } else { x })
+                .collect();
             println!("\n{} {}", plan.program, shown.join(" "));
             if plan.stdin.is_some() {
                 println!("(the prompt is sent on stdin)");
@@ -243,7 +311,12 @@ fn cmd_run(app: &App, a: RunArgs) -> Result<i32> {
                 eprintln!("warning: {warning}");
             }
             println!("{}", state.id);
-            eprintln!("started on `{}` at {}. Follow with: hufu wait {id}   hufu logs {id} -f   hufu result {id}", spec.profile.name, spec.permission, id = state.id);
+            eprintln!(
+                "started on `{}` at {}. Follow with: hufu wait {id}   hufu logs {id} -f   hufu result {id}",
+                spec.profile.name,
+                spec.permission,
+                id = state.id
+            );
         });
         return Ok(exit::OK);
     }
@@ -251,9 +324,15 @@ fn cmd_run(app: &App, a: RunArgs) -> Result<i32> {
         eprintln!("{} started on `{}` at {}", state.id, spec.profile.name, spec.permission);
     }
     let limit = a.wait_timeout.as_deref().map(|t| duration("--wait-timeout", t)).transpose()?;
-    let end = if a.follow && !app.json { follow(app, &state.id, 0, false, limit)? } else { runner::wait(&app.home, &state.id, limit)? };
+    let end = if a.follow && !app.json {
+        follow(app, &state.id, 0, false, limit)?
+    } else {
+        runner::wait(&app.home, &state.id, limit)?
+    };
     if !end.state.is_terminal() {
-        app.out(&hufu_mcp_view(&end), || eprintln!("still {} after the wait limit; the job keeps running: hufu wait {}", end.state.as_str(), end.id));
+        app.out(&hufu_mcp_view(&end), || {
+            eprintln!("still {} after the wait limit; the job keeps running: hufu wait {}", end.state.as_str(), end.id)
+        });
         return Ok(exit::WAIT_TIMED_OUT);
     }
     cmd_result(app, &state.id, false)
@@ -307,7 +386,8 @@ fn cmd_status(app: &App, a: StatusArgs) -> Result<i32> {
         all
     } else {
         let active: Vec<JobState> = all.iter().filter(|j| !j.state.is_terminal()).cloned().collect();
-        let mut recent: Vec<JobState> = all.iter().rev().filter(|j| j.state.is_terminal()).take(a.limit).cloned().collect();
+        let mut recent: Vec<JobState> =
+            all.iter().rev().filter(|j| j.state.is_terminal()).take(a.limit).cloned().collect();
         recent.reverse();
         recent.into_iter().chain(active).collect()
     };
@@ -325,26 +405,37 @@ fn cmd_wait(app: &App, a: WaitArgs) -> Result<i32> {
     let states: Vec<JobState> = loop {
         let states: Vec<JobState> = ids.iter().map(|id| store::load_state(&app.home, id)).collect::<Result<_>>()?;
         let finished = states.iter().filter(|s| s.state.is_terminal()).count();
-        if finished == states.len() || (a.any && finished > 0) || limit.map(|l| started.elapsed() >= l).unwrap_or(false) {
+        if finished == states.len() || (a.any && finished > 0) || limit.map(|l| started.elapsed() >= l).unwrap_or(false)
+        {
             break states;
         }
         std::thread::sleep(Duration::from_millis(150));
     };
     let pending = states.iter().any(|s| !s.state.is_terminal());
     let timed_out = pending && !(a.any && states.iter().any(|s| s.state.is_terminal()));
-    app.out(&json!({"wait_timed_out": timed_out, "jobs": states.iter().map(hufu_mcp_view).collect::<Vec<_>>()}), || render::jobs(&states));
+    app.out(
+        &json!({"wait_timed_out": timed_out, "jobs": states.iter().map(hufu_mcp_view).collect::<Vec<_>>()}),
+        || render::jobs(&states),
+    );
     if timed_out {
         return Ok(exit::WAIT_TIMED_OUT);
     }
     // The worst outcome decides the exit code, so `hufu wait a b && next` is safe.
-    Ok(states.iter().filter(|s| s.state.is_terminal()).map(|s| render::exit_code(s.state, s.verdict, s.reason.as_deref())).max().unwrap_or(exit::OK))
+    Ok(states
+        .iter()
+        .filter(|s| s.state.is_terminal())
+        .map(|s| render::exit_code(s.state, s.verdict, s.reason.as_deref()))
+        .max()
+        .unwrap_or(exit::OK))
 }
 
 fn cmd_result(app: &App, partial: &str, full: bool) -> Result<i32> {
     let id = store::resolve_job(&app.home, partial)?;
     let Some(result) = runner::result_of(&app.home, &id)? else {
         let state = store::load_state(&app.home, &id)?;
-        app.out(&json!({"job": id, "state": state.state.as_str(), "finished": false}), || eprintln!("{id} is still {}; wait for it with: hufu wait {id}", state.state.as_str()));
+        app.out(&json!({"job": id, "state": state.state.as_str(), "finished": false}), || {
+            eprintln!("{id} is still {}; wait for it with: hufu wait {id}", state.state.as_str())
+        });
         return Ok(exit::WAIT_TIMED_OUT);
     };
     let max = app.load().map(|l| l.config.defaults.result_chars).unwrap_or(4000);
@@ -434,7 +525,9 @@ fn cmd_cancel(app: &App, a: CancelArgs) -> Result<i32> {
         for s in &states {
             match s.state {
                 State::Cancelled => println!("{} cancelled", s.id),
-                state if state.is_terminal() => println!("{} had already ended ({})", s.id, state.as_str()),
+                state if state.is_terminal() => {
+                    println!("{} had already ended ({})", s.id, state.as_str())
+                }
                 _ => println!("{} is stopping; `hufu wait {}` returns when it has", s.id, s.id),
             }
         }
@@ -444,7 +537,8 @@ fn cmd_cancel(app: &App, a: CancelArgs) -> Result<i32> {
 
 fn cmd_resume(app: &App, a: ResumeArgs) -> Result<i32> {
     let id = store::resolve_job(&app.home, &a.job)?;
-    let prompt = read_prompt(&a.prompt, None)?.ok_or_else(|| HufuError::usage("give the follow-up prompt as an argument, or `-` to read it from stdin"))?;
+    let prompt = read_prompt(&a.prompt, None)?
+        .ok_or_else(|| HufuError::usage("give the follow-up prompt as an argument, or `-` to read it from stdin"))?;
     let spec = store::load_spec(&app.home, &id)?;
     let loaded = config::load(&app.home, &spec.cwd)?;
     let ctx = Context { home: &app.home, config: &loaded.config, adapters: &app.adapters };
@@ -494,7 +588,12 @@ fn cmd_doctor(app: &App, a: DoctorArgs) -> Result<i32> {
 
 fn cmd_prune(app: &App, a: PruneArgs) -> Result<i32> {
     let loaded = app.load()?;
-    let opts = PruneOptions { older_than: a.older_than.as_deref().map(|t| duration("--older-than", t)).transpose()?, keep: a.keep, worktrees: a.worktrees, dry_run: a.dry_run };
+    let opts = PruneOptions {
+        older_than: a.older_than.as_deref().map(|t| duration("--older-than", t)).transpose()?,
+        keep: a.keep,
+        worktrees: a.worktrees,
+        dry_run: a.dry_run,
+    };
     let report = ops::prune(&app.home, &loaded.config, &opts)?;
     app.out(&report, || {
         let verb = if report.dry_run { "would remove" } else { "removed" };
@@ -522,7 +621,10 @@ fn wait_mission(app: &App, id: &str, limit: Option<Duration>) -> Result<mission:
     let started = Instant::now();
     loop {
         let m = mission::load(&app.home, id)?;
-        if m.state.is_terminal() || m.state == MissionState::Paused || limit.map(|l| started.elapsed() >= l).unwrap_or(false) {
+        if m.state.is_terminal()
+            || m.state == MissionState::Paused
+            || limit.map(|l| started.elapsed() >= l).unwrap_or(false)
+        {
             return Ok(m);
         }
         std::thread::sleep(Duration::from_millis(300));
@@ -567,7 +669,11 @@ fn cmd_mission(app: &App, c: MissionCommand) -> Result<i32> {
                     "always" => ReviewPolicy::Always,
                     "on_failure" | "on-failure" => ReviewPolicy::OnFailure,
                     "never" => ReviewPolicy::Never,
-                    other => return Err(HufuError::usage(format!("unknown --review `{other}`; accepted: always, on_failure, never"))),
+                    other => {
+                        return Err(HufuError::usage(format!(
+                            "unknown --review `{other}`; accepted: always, on_failure, never"
+                        )));
+                    }
                 });
             }
             if let Some(t) = &a.max_tier {
@@ -581,13 +687,24 @@ fn cmd_mission(app: &App, c: MissionCommand) -> Result<i32> {
             if !a.allow_command.is_empty() {
                 spec.acceptance_commands = Some(a.allow_command.clone());
             }
-            let base = a.file.as_ref().and_then(|f| f.parent()).filter(|p| !p.as_os_str().is_empty() && a.cwd.is_none()).map(|p| app.cwd.join(p)).unwrap_or_else(|| app.cwd.clone());
+            let base = a
+                .file
+                .as_ref()
+                .and_then(|f| f.parent())
+                .filter(|p| !p.as_os_str().is_empty() && a.cwd.is_none())
+                .map(|p| app.cwd.join(p))
+                .unwrap_or_else(|| app.cwd.clone());
             let ctx = Context { home, config: &loaded.config, adapters: &app.adapters };
             let created = mission::create(&ctx, &spec, &base)?;
             mission::launch(home, &created.id)?;
             if a.wait {
                 if !app.json {
-                    eprintln!("{} started: advisor `{}`, executors {}", created.id, created.advisor, created.executors.join(", "));
+                    eprintln!(
+                        "{} started: advisor `{}`, executors {}",
+                        created.id,
+                        created.advisor,
+                        created.executors.join(", ")
+                    );
                 }
                 let done = wait_mission(app, &created.id, None)?;
                 app.out(&mission_view(home, &done), || print!("{}", mission::report(home, &done)));
@@ -631,7 +748,9 @@ fn cmd_mission(app: &App, c: MissionCommand) -> Result<i32> {
         MissionCommand::Pause { mission: partial } => {
             let id = mission::resolve(home, &partial)?;
             mission::pause(home, &id)?;
-            app.out(&json!({"mission": id, "pausing": true}), || println!("{id} will pause once its running jobs are done; continue with: hufu mission resume {id}"));
+            app.out(&json!({"mission": id, "pausing": true}), || {
+                println!("{id} will pause once its running jobs are done; continue with: hufu mission resume {id}")
+            });
             Ok(exit::OK)
         }
         MissionCommand::Resume { mission: partial } => {
@@ -643,7 +762,9 @@ fn cmd_mission(app: &App, c: MissionCommand) -> Result<i32> {
         MissionCommand::Abort { mission: partial } => {
             let id = mission::resolve(home, &partial)?;
             let m = mission::abort(home, &id)?;
-            app.out(&json!({"mission": id, "state": m.state.as_str()}), || println!("{id}: abort requested; running jobs are being cancelled, finished work is kept"));
+            app.out(&json!({"mission": id, "state": m.state.as_str()}), || {
+                println!("{id}: abort requested; running jobs are being cancelled, finished work is kept")
+            });
             Ok(exit::OK)
         }
     }
@@ -666,7 +787,12 @@ fn cmd_daemon(app: &App, c: DaemonCommand) -> Result<i32> {
         }
         DaemonCommand::Stop => {
             let was = hufu_daemon::stop(&app.home)?;
-            app.out(&json!({"running": false, "stopped": was}), || println!("{}", if was { "daemon stopped; running jobs are not affected" } else { "no daemon was running" }));
+            app.out(&json!({"running": false, "stopped": was}), || {
+                println!(
+                    "{}",
+                    if was { "daemon stopped; running jobs are not affected" } else { "no daemon was running" }
+                )
+            });
             Ok(exit::OK)
         }
         DaemonCommand::Status => {
@@ -689,7 +815,11 @@ fn print_init(report: &setup::InitReport) {
                 println!("no supported agent was found on PATH; install one and run `hufu init --force`");
             } else {
                 println!("agents found: {}", report.detected.join(", "));
-                println!("default advisor: {}   default executors: {}", report.advisor.as_deref().unwrap_or("-"), report.executors.join(", "));
+                println!(
+                    "default advisor: {}   default executors: {}",
+                    report.advisor.as_deref().unwrap_or("-"),
+                    report.executors.join(", ")
+                );
             }
         }
     }
@@ -720,11 +850,19 @@ fn cmd_setup(app: &App, a: SetupArgs) -> Result<i32> {
     } else {
         setup::detect_hosts()
     };
-    let opts = setup::SetupOptions { remove: a.remove, print: a.print, project: a.project.then(|| app.cwd.clone()), exe: submit::hufu_exe()? };
+    let opts = setup::SetupOptions {
+        remove: a.remove,
+        print: a.print,
+        project: a.project.then(|| app.cwd.clone()),
+        exe: submit::hufu_exe()?,
+    };
     let actions = setup::setup(&hosts, &opts);
     app.out(&json!({"actions": actions}), || {
         if hosts.is_empty() {
-            println!("no agent that could host Hufu was found. For any MCP-capable agent, add this server:\n{}", setup::generic_snippet(&opts.exe));
+            println!(
+                "no agent that could host Hufu was found. For any MCP-capable agent, add this server:\n{}",
+                setup::generic_snippet(&opts.exe)
+            );
         }
         print_actions(&actions);
     });
@@ -733,7 +871,14 @@ fn cmd_setup(app: &App, a: SetupArgs) -> Result<i32> {
 
 fn cmd_up(app: &App, a: UpArgs) -> Result<i32> {
     let init = setup::init(&app.home, &app.adapters, false)?;
-    let actions = if a.no_setup { Vec::new() } else { setup::setup(&setup::detect_hosts(), &setup::SetupOptions { remove: false, print: false, project: None, exe: submit::hufu_exe()? }) };
+    let actions = if a.no_setup {
+        Vec::new()
+    } else {
+        setup::setup(
+            &setup::detect_hosts(),
+            &setup::SetupOptions { remove: false, print: false, project: None, exe: submit::hufu_exe()? },
+        )
+    };
     let daemon = if a.no_daemon { None } else { Some(hufu_daemon::start(&app.home)) };
     let loaded = app.load()?;
     let report = doctor::doctor(&app.home, &loaded, &app.adapters, VERSION);
@@ -752,7 +897,10 @@ fn cmd_up(app: &App, a: UpArgs) -> Result<i32> {
         }
         println!();
         render::doctor(&report);
-        println!("\nready. Try: hufu run -a {} \"Summarise this repository\" --wait", report.executors.first().map(String::as_str).unwrap_or("<profile>"));
+        println!(
+            "\nready. Try: hufu run -a {} \"Summarise this repository\" --wait",
+            report.executors.first().map(String::as_str).unwrap_or("<profile>")
+        );
     });
     Ok(exit::OK)
 }
@@ -796,7 +944,11 @@ fn cmd_config(app: &App, c: ConfigCommand) -> Result<i32> {
             let problems = loaded.config.problems(&app.adapters);
             app.out(&json!({"valid": problems.is_empty(), "problems": problems}), || {
                 if problems.is_empty() {
-                    println!("the configuration is valid ({} profiles, {} pools)", loaded.config.profiles.len(), loaded.config.pools.len());
+                    println!(
+                        "the configuration is valid ({} profiles, {} pools)",
+                        loaded.config.profiles.len(),
+                        loaded.config.pools.len()
+                    );
                 } else {
                     for p in &problems {
                         println!("{p}");
@@ -829,7 +981,7 @@ fn profile_body(a: &ProfileArgs) -> Result<Value> {
     if let Some(p) = &a.permission {
         put("permission", Some(json!(Tier::parse(p).map_err(HufuError::usage)?)));
     }
-    put("allow_full_access", a.allow_full_access.then(|| json!(true)));
+    put("allow_full_access", a.allow_full_access.then_some(Value::Bool(true)));
     put("env", (!a.env.is_empty()).then(|| json!(a.env)));
     put("env_from", (!a.env_from.is_empty()).then(|| pairs("--env-from", &a.env_from).map(|m| json!(m))).transpose()?);
     put("vars", (!a.var.is_empty()).then(|| pairs("--var", &a.var).map(|m| json!(m))).transpose()?);
@@ -843,20 +995,28 @@ fn cmd_profile(app: &App, c: ProfileCommand) -> Result<i32> {
     match c {
         ProfileCommand::Add(a) => {
             if a.adapter.is_none() {
-                return Err(HufuError::usage(format!("`hufu profile add` needs `--adapter`; accepted: {}", hufu_contract::AdapterRegistry::kinds(&app.adapters).join(", "))));
+                return Err(HufuError::usage(format!(
+                    "`hufu profile add` needs `--adapter`; accepted: {}",
+                    hufu_contract::AdapterRegistry::kinds(&app.adapters).join(", ")
+                )));
             }
             let path = app.target(a.project);
             ops::profile_set(&path, &app.adapters, &a.name, profile_body(&a)?, false)?;
-            app.out(&json!({"written": path.path, "profile": a.name}), || println!("profile `{}` written to {}. Check it with: hufu doctor", a.name, path.display()));
+            app.out(&json!({"written": path.path, "profile": a.name}), || {
+                println!("profile `{}` written to {}. Check it with: hufu doctor", a.name, path.display())
+            });
         }
         ProfileCommand::Set(a) => {
             let path = app.target(a.project);
             // A preset has no entry in the file yet; changing one starts from the preset.
             let loaded = app.load()?;
             let mut body = profile_body(&a)?;
-            let in_file = config::get_path(&config::read_raw(&path.path)?, "profiles").and_then(|p| p.get(&a.name)).is_some();
+            let in_file =
+                config::get_path(&config::read_raw(&path.path)?, "profiles").and_then(|p| p.get(&a.name)).is_some();
             if !in_file {
-                let base = loaded.config.profile(&a.name).ok_or_else(|| HufuError::usage(format!("no profile `{}`; create it with `hufu profile add`", a.name)))?;
+                let base = loaded.config.profile(&a.name).ok_or_else(|| {
+                    HufuError::usage(format!("no profile `{}`; create it with `hufu profile add`", a.name))
+                })?;
                 let mut merged = serde_json::to_value(base).map_err(|e| HufuError::internal(e.to_string()))?;
                 if let (Some(m), Some(b)) = (merged.as_object_mut(), body.as_object()) {
                     m.remove("name");
@@ -867,17 +1027,24 @@ fn cmd_profile(app: &App, c: ProfileCommand) -> Result<i32> {
                 body = merged;
             }
             ops::profile_set(&path, &app.adapters, &a.name, body, true)?;
-            app.out(&json!({"written": path.path, "profile": a.name}), || println!("profile `{}` updated in {}", a.name, path.display()));
+            app.out(&json!({"written": path.path, "profile": a.name}), || {
+                println!("profile `{}` updated in {}", a.name, path.display())
+            });
         }
         ProfileCommand::Remove { name, project } => {
             let path = app.target(project);
             ops::profile_remove(&path, &app.adapters, &name)?;
-            app.out(&json!({"written": path.path, "removed": name}), || println!("profile `{name}` removed from {}", path.display()));
+            app.out(&json!({"written": path.path, "removed": name}), || {
+                println!("profile `{name}` removed from {}", path.display())
+            });
         }
         ProfileCommand::List => return cmd_agents(app, AgentsArgs { probe: false }),
         ProfileCommand::Show { name } => {
             let loaded = app.load()?;
-            let view = ops::agents(&loaded, &app.adapters, true).into_iter().find(|v| v.name == name).ok_or_else(|| HufuError::usage(format!("no profile or pool `{name}`; see `hufu agents`")))?;
+            let view = ops::agents(&loaded, &app.adapters, true)
+                .into_iter()
+                .find(|v| v.name == name)
+                .ok_or_else(|| HufuError::usage(format!("no profile or pool `{name}`; see `hufu agents`")))?;
             let profile = loaded.config.profile(&name).cloned();
             let doc = json!({"agent": view, "profile": profile});
             app.out(&doc, || print!("{}", config::to_yaml(&doc).unwrap_or_default()));
@@ -891,12 +1058,20 @@ fn cmd_pool(app: &App, c: PoolCommand) -> Result<i32> {
         PoolCommand::Add { name, member, strategy, description, project } => {
             let path = app.target(project);
             ops::pool_set(&path, &app.adapters, &name, &member, strategy.as_deref(), description.as_deref())?;
-            app.out(&json!({"written": path.path, "pool": name}), || println!("pool `{name}` ({}) written to {}. Use it as an agent: hufu run -a {name} \"...\"", member.join(", "), path.display()));
+            app.out(&json!({"written": path.path, "pool": name}), || {
+                println!(
+                    "pool `{name}` ({}) written to {}. Use it as an agent: hufu run -a {name} \"...\"",
+                    member.join(", "),
+                    path.display()
+                )
+            });
         }
         PoolCommand::Remove { name, project } => {
             let path = app.target(project);
             ops::pool_remove(&path, &app.adapters, &name)?;
-            app.out(&json!({"written": path.path, "removed": name}), || println!("pool `{name}` removed from {}", path.display()));
+            app.out(&json!({"written": path.path, "removed": name}), || {
+                println!("pool `{name}` removed from {}", path.display())
+            });
         }
         PoolCommand::List => {
             let loaded = app.load()?;

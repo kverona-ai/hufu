@@ -4,7 +4,7 @@
 //! tiers use the ACP surface (`kimi acp`) through the generic ACP adapter.
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventSink, LaunchPlan, Profile, ProbeResult, RawStream,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventSink, LaunchPlan, ProbeResult, Profile, RawStream,
     RunOutcome, RunRequest, StructuredOutput, Tier, json::instruct_json,
 };
 use serde_json::Value;
@@ -71,7 +71,10 @@ impl Adapter for KimiCli {
             return Err(AdapterError("Kimi print mode reads MCP servers from ~/.kimi-code/mcp.json only; use an ACP profile to attach one for a single run".into()));
         }
         if req.resume_session.is_some() {
-            return Err(AdapterError("Kimi print mode does not report a session id, so a follow-up cannot be sent; use an ACP profile".into()));
+            return Err(AdapterError(
+                "Kimi print mode does not report a session id, so a follow-up cannot be sent; use an ACP profile"
+                    .into(),
+            ));
         }
         let mut plan = common::plan_start(profile, DEFAULT);
         let prompt = match &req.output_schema {
@@ -87,7 +90,10 @@ impl Adapter for KimiCli {
             Effort::Low | Effort::Medium | Effort::High | Effort::Max => Some(req.effort.to_string()),
             Effort::Native(v) => Some(v.clone()),
             Effort::Off => {
-                return Err(AdapterError("Kimi Code has no `off` effort level; accepted: default, low, medium, high, max, native:<value>".into()));
+                return Err(AdapterError(
+                    "Kimi Code has no `off` effort level; accepted: default, low, medium, high, max, native:<value>"
+                        .into(),
+                ));
             }
         };
         if let Some(level) = level {
@@ -115,7 +121,9 @@ impl Adapter for KimiCli {
 }
 
 pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
     match v.get("role").and_then(Value::as_str).unwrap_or("") {
         "assistant" => {
             if let Some(content) = v.get("content") {

@@ -55,7 +55,6 @@ fn submit_schema() -> Value {
     )
 }
 
-
 const TOOLS: &[Tool] = &[
     Tool {
         name: "hufu_agents",
@@ -73,13 +72,23 @@ const TOOLS: &[Tool] = &[
         name: "hufu_status",
         title: "Job status",
         description: "With `job`: the state of one job, including its last activity. Without: the jobs that are queued or running, plus the most recent finished ones.",
-        schema: || obj(json!({"job": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "mission": {"type": "string"}}), &[]),
+        schema: || {
+            obj(
+                json!({"job": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "mission": {"type": "string"}}),
+                &[],
+            )
+        },
     },
     Tool {
         name: "hufu_wait",
         title: "Wait for jobs",
         description: "Blocks until the job (or all of `jobs`) reached a terminal state, or until the timeout. `wait_timed_out: true` means still running, not failed. Keep timeouts short and call again.",
-        schema: || obj(json!({"job": {"type": "string"}, "jobs": {"type": "array", "items": {"type": "string"}}, "timeout_s": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Default 50."}}), &[]),
+        schema: || {
+            obj(
+                json!({"job": {"type": "string"}, "jobs": {"type": "array", "items": {"type": "string"}}, "timeout_s": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Default 50."}}),
+                &[],
+            )
+        },
     },
     Tool {
         name: "hufu_result",
@@ -91,7 +100,12 @@ const TOOLS: &[Tool] = &[
         name: "hufu_logs",
         title: "Job events",
         description: "The normalized events of a job (messages, tool calls, permission decisions), oldest first. Pass `after` to read only what is new.",
-        schema: || obj(json!({"job": {"type": "string"}, "after": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}), &["job"]),
+        schema: || {
+            obj(
+                json!({"job": {"type": "string"}, "after": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}),
+                &["job"],
+            )
+        },
     },
     Tool {
         name: "hufu_cancel",
@@ -168,13 +182,23 @@ const TOOLS: &[Tool] = &[
         name: "hufu_config_set",
         title: "Change configuration",
         description: "Sets one key, for example roles.advisor, roles.executors, defaults.timeout, capabilities.computer_use.agent. A null value removes the key. The change is validated; an invalid one is refused and nothing is written.",
-        schema: || obj(json!({"key": {"type": "string"}, "value": {}, "project": {"type": "boolean", "description": "Write to .hufu/config.yaml of the current project instead of the user-wide file."}}), &["key", "value"]),
+        schema: || {
+            obj(
+                json!({"key": {"type": "string"}, "value": {}, "project": {"type": "boolean", "description": "Write to .hufu/config.yaml of the current project instead of the user-wide file."}}),
+                &["key", "value"],
+            )
+        },
     },
     Tool {
         name: "hufu_profile_set",
         title: "Add or change a profile",
         description: "Creates or updates an agent profile. Fields: adapter (codex-cli, agy-cli, cursor-cli, claude-cli, kimi-cli, pi, acp, external), model, provider, effort, permission, account (a label), home (the agent's own login directory, which is how two accounts of one agent are kept apart), env (names of variables to pass through), env_from ({AGENT_VAR: SHELL_VAR}), vars, command, description, provides ({computer_use: {via: native|lcu}}). Never put a secret value here.",
-        schema: || obj(json!({"name": {"type": "string"}, "profile": {"type": "object"}, "merge": {"type": "boolean", "description": "Keep fields that are not named. Default true."}, "project": {"type": "boolean"}}), &["name", "profile"]),
+        schema: || {
+            obj(
+                json!({"name": {"type": "string"}, "profile": {"type": "object"}, "merge": {"type": "boolean", "description": "Keep fields that are not named. Default true."}, "project": {"type": "boolean"}}),
+                &["name", "profile"],
+            )
+        },
     },
     Tool {
         name: "hufu_profile_remove",
@@ -209,7 +233,12 @@ const TOOLS: &[Tool] = &[
         name: "hufu_setup",
         title: "Register Hufu with agents",
         description: "Registers this MCP server with other agents (claude, codex, cursor, kimi, agy) so that they can dispatch through Hufu too. Without `agents`, every agent found on this machine. `print` shows what would be written.",
-        schema: || obj(json!({"agents": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "boolean"}, "print": {"type": "boolean"}}), &[]),
+        schema: || {
+            obj(
+                json!({"agents": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "boolean"}, "print": {"type": "boolean"}}),
+                &[],
+            )
+        },
     },
 ];
 
@@ -229,7 +258,10 @@ pub fn names(child: bool) -> Vec<&'static str> {
 }
 
 pub fn list(child: bool) -> Vec<Value> {
-    table(child).iter().map(|t| json!({"name": t.name, "title": t.title, "description": t.description, "inputSchema": (t.schema)()})).collect()
+    table(child)
+        .iter()
+        .map(|t| json!({"name": t.name, "title": t.title, "description": t.description, "inputSchema": (t.schema)()}))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -252,7 +284,13 @@ pub fn job_view(state: &JobState) -> Value {
         "job": state.id, "state": state.state.as_str(), "verdict": state.verdict.as_str(), "title": state.title,
         "agent": state.agent, "profile": state.profile, "permission": state.permission, "elapsed_s": state.elapsed_s(),
     });
-    for (key, value) in [("reason", &state.reason), ("detail", &state.detail), ("last_activity", &state.last_activity), ("queue", &state.queue), ("mission", &state.mission)] {
+    for (key, value) in [
+        ("reason", &state.reason),
+        ("detail", &state.detail),
+        ("last_activity", &state.last_activity),
+        ("queue", &state.queue),
+        ("mission", &state.mission),
+    ] {
         if let Some(value) = value {
             v[key] = json!(value);
         }
@@ -285,7 +323,9 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
         "hufu_agents" => {
             let (loaded, _) = server.load(None)?;
             let agents = ops::agents(&loaded, adapters, flag(args, "probe"));
-            Ok(json!({"agents": agents, "roles": loaded.config.roles, "computer_use": loaded.config.capabilities.computer_use}))
+            Ok(
+                json!({"agents": agents, "roles": loaded.config.roles, "computer_use": loaded.config.capabilities.computer_use}),
+            )
         }
         "hufu_submit" => {
             let (loaded, _) = server.load(text(args, "cwd"))?;
@@ -300,13 +340,20 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             let cu_route = map.remove("computer_use_route").and_then(|v| v.as_str().map(str::to_string));
             let mut task = TaskSpec::from_value(body)?;
             if let Some(apps) = apps.and_then(|a| a.as_array().cloned()) {
-                task.grants.push(Grant { capability: capability::COMPUTER_USE.into(), apps: apps.iter().filter_map(|a| a.as_str().map(str::to_string)).collect() });
+                task.grants.push(Grant {
+                    capability: capability::COMPUTER_USE.into(),
+                    apps: apps.iter().filter_map(|a| a.as_str().map(str::to_string)).collect(),
+                });
             }
             if cu_agent.is_some() || cu_route.is_some() {
                 let route = match cu_route.as_deref() {
                     Some("dedicated") => Some(Route::Dedicated),
                     Some("executor") => Some(Route::Executor),
-                    Some(other) => return Err(HufuError::usage(format!("unknown computer_use_route `{other}`; accepted: dedicated, executor"))),
+                    Some(other) => {
+                        return Err(HufuError::usage(format!(
+                            "unknown computer_use_route `{other}`; accepted: dedicated, executor"
+                        )));
+                    }
                     None => None,
                 };
                 task.computer_use = Some(ComputerUseOverride { route, agent: cu_agent });
@@ -316,7 +363,9 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             if dry_run {
                 let spec = submit::prepare(&ctx, &task, &opts)?;
                 let plan = submit::launch_plan(&ctx, &spec)?;
-                return Ok(json!({"dry_run": true, "profile": spec.profile.name, "permission": spec.permission, "effort": spec.effort, "warnings": spec.warnings, "launch": plan}));
+                return Ok(
+                    json!({"dry_run": true, "profile": spec.profile.name, "permission": spec.permission, "effort": spec.effort, "warnings": spec.warnings, "launch": plan}),
+                );
             }
             let spec = submit::prepare(&ctx, &task, &opts)?;
             let state = submit::submit_spec(home, &spec, false)?;
@@ -333,9 +382,15 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             }
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
             let mission = text(args, "mission");
-            let jobs: Vec<JobState> = store::list_jobs(home).into_iter().filter(|j| mission.map(|m| j.mission.as_deref().map(|x| x.starts_with(m)).unwrap_or(false)).unwrap_or(true)).collect();
+            let jobs: Vec<JobState> = store::list_jobs(home)
+                .into_iter()
+                .filter(|j| {
+                    mission.map(|m| j.mission.as_deref().map(|x| x.starts_with(m)).unwrap_or(false)).unwrap_or(true)
+                })
+                .collect();
             let active: Vec<Value> = jobs.iter().filter(|j| !j.state.is_terminal()).map(job_view).collect();
-            let recent: Vec<Value> = jobs.iter().rev().filter(|j| j.state.is_terminal()).take(limit).map(job_view).collect();
+            let recent: Vec<Value> =
+                jobs.iter().rev().filter(|j| j.state.is_terminal()).take(limit).map(job_view).collect();
             Ok(json!({"active": active, "recent": recent}))
         }
         "hufu_wait" => {
@@ -364,7 +419,9 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             let id = store::resolve_job(home, need(args, "job")?)?;
             let Some(mut result) = runner::result_of(home, &id)? else {
                 let state = store::load_state(home, &id)?;
-                return Ok(json!({"job": id, "state": state.state.as_str(), "finished": false, "last_activity": state.last_activity, "note": "the job is still going; call hufu_wait"}));
+                return Ok(
+                    json!({"job": id, "state": state.state.as_str(), "finished": false, "last_activity": state.last_activity, "note": "the job is still going; call hufu_wait"}),
+                );
             };
             let (loaded, _) = server.load(None)?;
             let max = loaded.config.defaults.result_chars;
@@ -390,8 +447,14 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
             let events = store::read_events(home, &id, after);
             let total = events.len();
-            let shown: Vec<Value> = events.iter().take(limit).map(|e| json!({"seq": e.seq, "ts": e.ts, "summary": e.body.summary()})).collect();
-            Ok(json!({"job": id, "events": shown, "more": total > limit, "last_seq": events.iter().take(limit).last().map(|e| e.seq).unwrap_or(after)}))
+            let shown: Vec<Value> = events
+                .iter()
+                .take(limit)
+                .map(|e| json!({"seq": e.seq, "ts": e.ts, "summary": e.body.summary()}))
+                .collect();
+            Ok(
+                json!({"job": id, "events": shown, "more": total > limit, "last_seq": events.iter().take(limit).next_back().map(|e| e.seq).unwrap_or(after)}),
+            )
         }
         "hufu_cancel" => {
             let id = store::resolve_job(home, need(args, "job")?)?;
@@ -412,15 +475,20 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             if let Some(map) = body.as_object_mut() {
                 map.remove("cwd");
             }
-            let mut spec: MissionSpec = serde_json::from_value(body).map_err(|e| HufuError::usage(format!("invalid mission: {e}")))?;
+            let mut spec: MissionSpec =
+                serde_json::from_value(body).map_err(|e| HufuError::usage(format!("invalid mission: {e}")))?;
             spec.cwd = Some(dir.display().to_string());
             let ctx = Context { home, config: &loaded.config, adapters };
             let created = mission::create(&ctx, &spec, &server.cwd)?;
             mission::launch(home, &created.id)?;
-            Ok(json!({"mission": created.id, "state": created.state.as_str(), "advisor": created.advisor, "executors": created.executors, "next": "call hufu_mission_status with this id"}))
+            Ok(
+                json!({"mission": created.id, "state": created.state.as_str(), "advisor": created.advisor, "executors": created.executors, "next": "call hufu_mission_status with this id"}),
+            )
         }
         "hufu_mission_status" => match text(args, "mission") {
-            None => Ok(json!({"missions": mission::list(home).iter().map(|m| json!({"mission": m.id, "title": m.title, "state": m.state.as_str(), "tasks": m.tasks.len(), "created_at": m.created_at})).collect::<Vec<_>>()})),
+            None => Ok(
+                json!({"missions": mission::list(home).iter().map(|m| json!({"mission": m.id, "title": m.title, "state": m.state.as_str(), "tasks": m.tasks.len(), "created_at": m.created_at})).collect::<Vec<_>>()}),
+            ),
             Some(partial) => {
                 let id = mission::resolve(home, partial)?;
                 let m = mission::load(home, &id)?;
@@ -442,7 +510,9 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
         "hufu_mission_pause" => {
             let id = mission::resolve(home, need(args, "mission")?)?;
             mission::pause(home, &id)?;
-            Ok(json!({"mission": id, "pausing": true, "note": "running jobs finish first; continue with hufu_mission_resume"}))
+            Ok(
+                json!({"mission": id, "pausing": true, "note": "running jobs finish first; continue with hufu_mission_resume"}),
+            )
         }
         "hufu_mission_resume" => {
             let id = mission::resolve(home, need(args, "mission")?)?;
@@ -451,7 +521,8 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
         }
         "hufu_doctor" => {
             let (loaded, _) = server.load(None)?;
-            let mut v = serde_json::to_value(doctor::doctor(home, &loaded, adapters, server.version)).map_err(|e| HufuError::internal(e.to_string()))?;
+            let mut v = serde_json::to_value(doctor::doctor(home, &loaded, adapters, server.version))
+                .map_err(|e| HufuError::internal(e.to_string()))?;
             if flag(args, "self_test") {
                 v["self_test"] = json!(doctor::self_test(adapters));
             }
@@ -460,7 +531,9 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
         "hufu_config_get" => {
             let (loaded, _) = server.load(None)?;
             let value = ops::config_get(&loaded.config, text(args, "key"))?;
-            Ok(json!({"key": text(args, "key"), "value": value, "files": [loaded.global_path.display().to_string(), loaded.project_path.map(|p| p.display().to_string())]}))
+            Ok(
+                json!({"key": text(args, "key"), "value": value, "files": [loaded.global_path.display().to_string(), loaded.project_path.map(|p| p.display().to_string())]}),
+            )
         }
         "hufu_config_set" => {
             let key = need(args, "key")?;
@@ -473,11 +546,17 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
         }
         "hufu_profile_set" => {
             let name = need(args, "name")?;
-            let body = args.get("profile").cloned().filter(Value::is_object).ok_or_else(|| HufuError::usage("`profile` must be an object"))?;
+            let body = args
+                .get("profile")
+                .cloned()
+                .filter(Value::is_object)
+                .ok_or_else(|| HufuError::usage("`profile` must be an object"))?;
             let path = server.target(args);
             let merge = args.get("merge").and_then(Value::as_bool).unwrap_or(true);
             ops::profile_set(&path, adapters, name, body, merge)?;
-            Ok(json!({"written": path.display().to_string(), "profile": name, "next": "hufu_doctor shows whether the agent is installed and logged in"}))
+            Ok(
+                json!({"written": path.display().to_string(), "profile": name, "next": "hufu_doctor shows whether the agent is installed and logged in"}),
+            )
         }
         "hufu_profile_remove" => {
             let path = server.target(args);
@@ -485,9 +564,22 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             Ok(json!({"written": path.display().to_string()}))
         }
         "hufu_pool_set" => {
-            let members: Vec<String> = args.get("members").and_then(Value::as_array).into_iter().flatten().filter_map(|m| m.as_str().map(str::to_string)).collect();
+            let members: Vec<String> = args
+                .get("members")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m.as_str().map(str::to_string))
+                .collect();
             let path = server.target(args);
-            ops::pool_set(&path, adapters, need(args, "name")?, &members, text(args, "strategy"), text(args, "description"))?;
+            ops::pool_set(
+                &path,
+                adapters,
+                need(args, "name")?,
+                &members,
+                text(args, "strategy"),
+                text(args, "description"),
+            )?;
             Ok(json!({"written": path.display().to_string(), "pool": need(args, "name")?}))
         }
         "hufu_pool_remove" => {
@@ -495,13 +587,25 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             ops::pool_remove(&path, adapters, need(args, "name")?)?;
             Ok(json!({"written": path.display().to_string()}))
         }
-        "hufu_init" => Ok(serde_json::to_value(setup::init(home, adapters, flag(args, "force"))?).map_err(|e| HufuError::internal(e.to_string()))?),
+        "hufu_init" => Ok(serde_json::to_value(setup::init(home, adapters, flag(args, "force"))?)
+            .map_err(|e| HufuError::internal(e.to_string()))?),
         "hufu_setup" => {
-            let mut hosts: Vec<String> = args.get("agents").and_then(Value::as_array).into_iter().flatten().filter_map(|m| m.as_str().map(str::to_string)).collect();
+            let mut hosts: Vec<String> = args
+                .get("agents")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m.as_str().map(str::to_string))
+                .collect();
             if hosts.is_empty() {
                 hosts = setup::detect_hosts();
             }
-            let opts = setup::SetupOptions { remove: flag(args, "remove"), print: flag(args, "print"), project: None, exe: submit::hufu_exe()? };
+            let opts = setup::SetupOptions {
+                remove: flag(args, "remove"),
+                print: flag(args, "print"),
+                project: None,
+                exe: submit::hufu_exe()?,
+            };
             Ok(json!({"actions": setup::setup(&hosts, &opts)}))
         }
         other => Err(HufuError::usage(format!("unknown tool `{other}`"))),
@@ -511,17 +615,29 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
 /// The hand-over: one desktop step, carried out by the configured agent as a child job.
 fn computer_use(server: &Server, args: &Value) -> Result<Value> {
     let home = &server.home;
-    let parent = server.child_of.as_deref().ok_or_else(|| HufuError::usage("this tool is only available inside a job"))?;
+    let parent =
+        server.child_of.as_deref().ok_or_else(|| HufuError::usage("this tool is only available inside a job"))?;
     let instruction = need(args, "instruction")?;
     let spec = store::load_spec(home, parent)?;
-    let plan = spec.computer_use.clone().filter(|p| p.route == Route::Dedicated).ok_or_else(|| HufuError::usage("this job has no computer-use grant that is served by another agent"))?;
+    let plan = spec
+        .computer_use
+        .clone()
+        .filter(|p| p.route == Route::Dedicated)
+        .ok_or_else(|| HufuError::usage("this job has no computer-use grant that is served by another agent"))?;
     if store::load_state(home, parent)?.state.is_terminal() {
         return Err(HufuError::usage("the job this tool belongs to has ended"));
     }
     let loaded = config::load(home, &spec.cwd)?;
-    let operator = loaded.config.profile(&plan.agent).cloned().ok_or_else(|| HufuError::usage(format!("computer-use agent `{}` is no longer a profile", plan.agent)))?;
+    let operator = loaded
+        .config
+        .profile(&plan.agent)
+        .cloned()
+        .ok_or_else(|| HufuError::usage(format!("computer-use agent `{}` is no longer a profile", plan.agent)))?;
     let caps = server.adapters.get(&operator.adapter).map(|a| a.capabilities(&operator));
-    let tier = operator.permission.or_else(|| caps.and_then(|c| c.permission_tiers.iter().copied().min())).unwrap_or(Tier::ReadOnly);
+    let tier = operator
+        .permission
+        .or_else(|| caps.and_then(|c| c.permission_tiers.iter().copied().min()))
+        .unwrap_or(Tier::ReadOnly);
     let mut labels = std::collections::BTreeMap::new();
     labels.insert(runner::OPERATOR_LABEL.to_string(), parent.to_string());
     let task = TaskSpec {
@@ -536,7 +652,12 @@ fn computer_use(server: &Server, args: &Value) -> Result<Value> {
         ..TaskSpec::default()
     };
     let ctx = Context { home, config: &loaded.config, adapters: server.adapters };
-    let opts = Options { base_dir: spec.cwd.clone(), parent: Some(parent.to_string()), mission: spec.mission.clone(), ..Options::default() };
+    let opts = Options {
+        base_dir: spec.cwd.clone(),
+        parent: Some(parent.to_string()),
+        mission: spec.mission.clone(),
+        ..Options::default()
+    };
     let child = submit::submit(&ctx, &task, &opts)?;
     // Wait for the step, but not beyond the life of the job it belongs to.
     loop {
@@ -544,7 +665,9 @@ fn computer_use(server: &Server, args: &Value) -> Result<Value> {
         if state.state.is_terminal() {
             break;
         }
-        if store::load_state(home, parent).map(|p| p.state.is_terminal()).unwrap_or(true) || store::cancel_requested(home, parent) {
+        if store::load_state(home, parent).map(|p| p.state.is_terminal()).unwrap_or(true)
+            || store::cancel_requested(home, parent)
+        {
             let _ = runner::cancel(home, &child.id);
             return Err(HufuError::usage("the job was stopped while the desktop step was running"));
         }
@@ -573,7 +696,11 @@ mod tests {
                 let schema = &tool["inputSchema"];
                 assert_eq!(schema["type"], "object", "{}", tool["name"]);
                 for required in schema["required"].as_array().unwrap() {
-                    assert!(schema["properties"].get(required.as_str().unwrap()).is_some(), "{}: required `{required}` is not a property", tool["name"]);
+                    assert!(
+                        schema["properties"].get(required.as_str().unwrap()).is_some(),
+                        "{}: required `{required}` is not a property",
+                        tool["name"]
+                    );
                 }
                 assert!(tool["description"].as_str().unwrap().len() > 20);
             }

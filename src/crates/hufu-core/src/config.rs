@@ -282,7 +282,12 @@ pub struct ComputerUse {
 
 impl Default for ComputerUse {
     fn default() -> Self {
-        ComputerUse { route: Route::Dedicated, agent: None, when_unavailable: WhenUnavailable::Error, max_concurrent: 1 }
+        ComputerUse {
+            route: Route::Dedicated,
+            agent: None,
+            when_unavailable: WhenUnavailable::Error,
+            max_concurrent: 1,
+        }
     }
 }
 
@@ -344,7 +349,11 @@ impl Config {
         if problems.is_empty() {
             Ok(())
         } else {
-            Err(HufuError::usage(format!("the configuration has {} problem(s); fix them first (`hufu config validate` lists them):\n  {}", problems.len(), problems.join("\n  "))))
+            Err(HufuError::usage(format!(
+                "the configuration has {} problem(s); fix them first (`hufu config validate` lists them):\n  {}",
+                problems.len(),
+                problems.join("\n  ")
+            )))
         }
     }
 }
@@ -352,7 +361,7 @@ impl Config {
 /// What a name in `agent:` refers to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AgentRef {
-    Profile(Profile),
+    Profile(Box<Profile>),
     Pool { name: String, strategy: Strategy, members: Vec<Profile> },
 }
 
@@ -364,7 +373,7 @@ impl Config {
     /// Resolves a profile or pool name. The error lists what would have been accepted.
     pub fn agent(&self, name: &str) -> Result<AgentRef> {
         if let Some(p) = self.profiles.get(name) {
-            return Ok(AgentRef::Profile(p.clone()));
+            return Ok(AgentRef::Profile(Box::new(p.clone())));
         }
         if let Some(pool) = self.pools.get(name) {
             let members = pool.members.iter().filter_map(|m| self.profiles.get(m).cloned()).collect();
@@ -415,14 +424,23 @@ impl Config {
         for (name, profile) in &self.profiles {
             let at = format!("profiles.{name}");
             let Some(adapter) = adapters.get(&profile.adapter) else {
-                out.push(format!("{at}.adapter: unknown adapter `{}`; accepted: {}", profile.adapter, adapters.kinds().join(", ")));
+                out.push(format!(
+                    "{at}.adapter: unknown adapter `{}`; accepted: {}",
+                    profile.adapter,
+                    adapters.kinds().join(", ")
+                ));
                 continue;
             };
             if matches!(profile.adapter.as_str(), "acp" | "external") && profile.command.is_empty() {
-                out.push(format!("{at}.command: adapter `{}` needs the argv that starts the agent, for example `[kimi, acp]`", profile.adapter));
+                out.push(format!(
+                    "{at}.command: adapter `{}` needs the argv that starts the agent, for example `[kimi, acp]`",
+                    profile.adapter
+                ));
             }
             if profile.permission == Some(Tier::FullAccess) && !profile.allow_full_access {
-                out.push(format!("{at}.permission: `full-access` as a profile default also needs `allow_full_access: true`"));
+                out.push(format!(
+                    "{at}.permission: `full-access` as a profile default also needs `allow_full_access: true`"
+                ));
             }
             if profile.home.is_some() && adapter.home_var().is_none() {
                 out.push(format!(
@@ -472,15 +490,14 @@ impl Config {
             }
         }
         let cu = &self.capabilities.computer_use;
-        match &cu.agent {
-            Some(agent) => match self.profiles.get(agent) {
+        if let Some(agent) = &cu.agent {
+            match self.profiles.get(agent) {
                 None => out.push(format!("capabilities.computer_use.agent: `{agent}` is not a profile")),
                 Some(p) if !p.provides.contains_key("computer_use") => out.push(format!(
                     "capabilities.computer_use.agent: profile `{agent}` does not declare `provides: {{computer_use: {{via: ...}}}}`; only an agent that supports computer use can serve it"
                 )),
                 Some(_) => {}
-            },
-            None => {}
+            }
         }
         if cu.max_concurrent == 0 {
             out.push("capabilities.computer_use.max_concurrent: must be at least 1".into());
@@ -493,7 +510,8 @@ impl Config {
 fn looks_secret(key: &str, value: &str) -> bool {
     let key = key.to_ascii_uppercase();
     let named = ["_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_CREDENTIALS"].iter().any(|s| key.ends_with(s));
-    let shaped = ["sk-", "ghp_", "gho_", "xoxb-", "xoxp-", "AKIA"].iter().any(|p| value.starts_with(p)) && value.len() >= 16;
+    let shaped =
+        ["sk-", "ghp_", "gho_", "xoxb-", "xoxp-", "AKIA"].iter().any(|p| value.starts_with(p)) && value.len() >= 16;
     !value.is_empty() && (named || shaped)
 }
 
@@ -501,7 +519,12 @@ fn looks_secret(key: &str, value: &str) -> bool {
 pub fn presets() -> BTreeMap<String, Profile> {
     let mut out = BTreeMap::new();
     let mut add = |name: &str, adapter: &str, description: &str, edit: &dyn Fn(&mut Profile)| {
-        let mut p = Profile { name: name.to_string(), adapter: adapter.to_string(), description: Some(description.to_string()), ..Profile::default() };
+        let mut p = Profile {
+            name: name.to_string(),
+            adapter: adapter.to_string(),
+            description: Some(description.to_string()),
+            ..Profile::default()
+        };
         edit(&mut p);
         out.insert(name.to_string(), p);
     };
@@ -655,7 +678,10 @@ pub fn write_raw(path: &Path, raw: &Value, base: Option<&Value>, adapters: &dyn 
         None => raw.clone(),
     };
     if let Err(problems) = check_raw(&effective, adapters) {
-        return Err(HufuError::usage(format!("the change would make the configuration invalid:\n  {}", problems.join("\n  "))));
+        return Err(HufuError::usage(format!(
+            "the change would make the configuration invalid:\n  {}",
+            problems.join("\n  ")
+        )));
     }
     let mut doc = raw.clone();
     if let Some(map) = doc.as_object_mut() {
@@ -670,9 +696,12 @@ pub fn write_raw(path: &Path, raw: &Value, base: Option<&Value>, adapters: &dyn 
 
 /// Puts top-level sections in the order a reader expects.
 fn ordered(doc: &Value) -> Value {
-    let Some(map) = doc.as_object() else { return doc.clone() };
+    let Some(map) = doc.as_object() else {
+        return doc.clone();
+    };
     let mut out = Map::new();
-    for key in ["version", "defaults", "limits", "roles", "profiles", "pools", "missions", "capabilities", "retention"] {
+    for key in ["version", "defaults", "limits", "roles", "profiles", "pools", "missions", "capabilities", "retention"]
+    {
         if let Some(v) = map.get(key) {
             out.insert(key.to_string(), v.clone());
         }
@@ -706,7 +735,9 @@ pub fn set_path(raw: &mut Value, dotted: &str, value: Value) -> Result<()> {
 /// Removes `a.b.c` from a raw document. Returns whether it was there.
 pub fn remove_path(raw: &mut Value, dotted: &str) -> bool {
     let parts: Vec<&str> = dotted.split('.').filter(|p| !p.is_empty()).collect();
-    let Some((last, parents)) = parts.split_last() else { return false };
+    let Some((last, parents)) = parts.split_last() else {
+        return false;
+    };
     let mut cursor = raw;
     for part in parents {
         match cursor.get_mut(*part) {
@@ -752,10 +783,20 @@ pub(crate) mod tests_support {
         fn capabilities(&self, _: &Profile) -> hufu_contract::Capabilities {
             unimplemented!()
         }
-        fn plan(&self, _: &Profile, _: &hufu_contract::RunRequest) -> std::result::Result<hufu_contract::LaunchPlan, hufu_contract::AdapterError> {
+        fn plan(
+            &self,
+            _: &Profile,
+            _: &hufu_contract::RunRequest,
+        ) -> std::result::Result<hufu_contract::LaunchPlan, hufu_contract::AdapterError> {
             unimplemented!()
         }
-        fn run(&self, _: &Profile, _: &hufu_contract::RunRequest, _: &dyn hufu_contract::EventSink, _: &hufu_contract::CancelToken) -> hufu_contract::RunOutcome {
+        fn run(
+            &self,
+            _: &Profile,
+            _: &hufu_contract::RunRequest,
+            _: &dyn hufu_contract::EventSink,
+            _: &hufu_contract::CancelToken,
+        ) -> hufu_contract::RunOutcome {
             unimplemented!()
         }
     }
@@ -878,8 +919,16 @@ capabilities:
         let project = dir.join("proj");
         std::fs::create_dir_all(project.join(".hufu")).unwrap();
         std::fs::create_dir_all(&home.root).unwrap();
-        std::fs::write(home.config_file(), "defaults: {timeout: 10m, effort: low}\nprofiles:\n  x: {adapter: codex-cli, model: m1, effort: high}\n").unwrap();
-        std::fs::write(project.join(".hufu/config.yaml"), "defaults: {timeout: 20m}\nprofiles:\n  x: {adapter: codex-cli, model: m2}\n").unwrap();
+        std::fs::write(
+            home.config_file(),
+            "defaults: {timeout: 10m, effort: low}\nprofiles:\n  x: {adapter: codex-cli, model: m1, effort: high}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".hufu/config.yaml"),
+            "defaults: {timeout: 20m}\nprofiles:\n  x: {adapter: codex-cli, model: m2}\n",
+        )
+        .unwrap();
         let loaded = load(&home, &project.join("deeper/dir")).unwrap();
         assert_eq!(loaded.config.defaults.timeout, "20m");
         assert_eq!(loaded.config.defaults.effort, Effort::Low, "unset fields keep the global value");
@@ -920,13 +969,25 @@ mod yaml_gotchas {
 
     #[test]
     fn retry_on_is_a_string_key() {
-        let v = parse_yaml("defaults:\n  retry:\n    max_attempts: 3\n    on: [rate_limited, agent_error]\n    backoff: 5s\n").unwrap();
+        let v = parse_yaml(
+            "defaults:\n  retry:\n    max_attempts: 3\n    on: [rate_limited, agent_error]\n    backoff: 5s\n",
+        )
+        .unwrap();
         let config: Config = serde_json::from_value(v).unwrap();
         assert_eq!(config.defaults.retry.on, ["rate_limited", "agent_error"]);
         // Words YAML 1.1 read as booleans are names here.
-        assert_eq!(parse_yaml("a: [yes, no, on, off, y, true]").unwrap()["a"], json!(["yes", "no", "on", "off", "y", true]));
-        assert_eq!(parse_yaml("model: 0613
-count: 12").unwrap(), json!({"model": "0613", "count": 12}));
+        assert_eq!(
+            parse_yaml("a: [yes, no, on, off, y, true]").unwrap()["a"],
+            json!(["yes", "no", "on", "off", "y", true])
+        );
+        assert_eq!(
+            parse_yaml(
+                "model: 0613
+count: 12"
+            )
+            .unwrap(),
+            json!({"model": "0613", "count": 12})
+        );
         assert_eq!(parse_scalar("no"), json!("no"));
         assert_eq!(parse_scalar("[a, b]"), json!(["a", "b"]));
         assert_eq!(parse_scalar("4"), json!(4));

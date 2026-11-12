@@ -17,7 +17,15 @@ pub struct Host {
 
 impl Host {
     pub fn start(env: &Env, args: &[&str]) -> Host {
-        let mut child = env.command(&env.work).arg("mcp").args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().expect("hufu mcp starts");
+        let mut child = env
+            .command(&env.work)
+            .arg("mcp")
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("hufu mcp starts");
         let stdin = child.stdin.take();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Host { child, stdin, stdout, next: 0 }
@@ -32,7 +40,8 @@ impl Host {
     pub fn read(&mut self) -> Value {
         let mut line = String::new();
         self.stdout.read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap_or_else(|e| panic!("the server wrote something that is not JSON ({e}): {line:?}"))
+        serde_json::from_str(&line)
+            .unwrap_or_else(|e| panic!("the server wrote something that is not JSON ({e}): {line:?}"))
     }
 
     pub fn request(&mut self, method: &str, params: Value) -> Value {
@@ -94,9 +103,28 @@ fn the_handshake_and_the_tool_list_follow_the_protocol() {
     let tools = host.request("tools/list", json!({}))["result"]["tools"].as_array().unwrap().clone();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     for wanted in [
-        "hufu_agents", "hufu_submit", "hufu_status", "hufu_wait", "hufu_result", "hufu_logs", "hufu_cancel", "hufu_resume", "hufu_mission_start", "hufu_mission_status",
-        "hufu_mission_abort", "hufu_mission_pause", "hufu_mission_resume", "hufu_doctor", "hufu_config_get", "hufu_config_set", "hufu_profile_set", "hufu_profile_remove",
-        "hufu_pool_set", "hufu_pool_remove", "hufu_init", "hufu_setup",
+        "hufu_agents",
+        "hufu_submit",
+        "hufu_status",
+        "hufu_wait",
+        "hufu_result",
+        "hufu_logs",
+        "hufu_cancel",
+        "hufu_resume",
+        "hufu_mission_start",
+        "hufu_mission_status",
+        "hufu_mission_abort",
+        "hufu_mission_pause",
+        "hufu_mission_resume",
+        "hufu_doctor",
+        "hufu_config_get",
+        "hufu_config_set",
+        "hufu_profile_set",
+        "hufu_profile_remove",
+        "hufu_pool_set",
+        "hufu_pool_remove",
+        "hufu_init",
+        "hufu_setup",
     ] {
         assert!(names.contains(&wanted), "tool `{wanted}` is missing: {names:?}");
     }
@@ -107,9 +135,15 @@ fn the_handshake_and_the_tool_list_follow_the_protocol() {
     }
 
     // An older host gets its own revision back; an unknown one gets the newest the server knows.
-    let old = host.request("initialize", json!({"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "old", "version": "1"}}));
+    let old = host.request(
+        "initialize",
+        json!({"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "old", "version": "1"}}),
+    );
     assert_eq!(old["result"]["protocolVersion"], "2024-11-05");
-    let odd = host.request("initialize", json!({"protocolVersion": "1999-01-01", "capabilities": {}, "clientInfo": {"name": "odd", "version": "1"}}));
+    let odd = host.request(
+        "initialize",
+        json!({"protocolVersion": "1999-01-01", "capabilities": {}, "clientInfo": {"name": "odd", "version": "1"}}),
+    );
     assert_eq!(odd["result"]["protocolVersion"], "2025-11-25");
 
     // Errors use the protocol's codes, and garbage does not end the session.
@@ -184,7 +218,12 @@ fn an_agent_can_dispatch_a_job_and_read_its_result() {
     let follow = host.call("hufu_resume", json!({"job": id, "prompt": "one more thing"}));
     let follow_id = follow["job"].as_str().unwrap().to_string();
     host.call("hufu_wait", json!({"jobs": [follow_id]}));
-    assert!(host.call("hufu_result", json!({"job": follow_id}))["final_message"].as_str().unwrap().contains("resumed fake-session-1"));
+    assert!(
+        host.call("hufu_result", json!({"job": follow_id}))["final_message"]
+            .as_str()
+            .unwrap()
+            .contains("resumed fake-session-1")
+    );
 
     // A structured answer, a still-running job, and a cancellation.
     let structured = host.call("hufu_submit", json!({"agent": "claude", "prompt": "[[fake:json={\"n\":3}]]", "output_schema": {"type": "object", "required": ["n"], "properties": {"n": {"type": "integer"}}}}));
@@ -216,7 +255,10 @@ fn an_agent_can_configure_hufu() {
     let home_a = env.root.join("acct-a").display().to_string();
     host.call("hufu_profile_set", json!({"name": "codex-work", "profile": {"adapter": "codex-cli", "command": fake("codex"), "account": "work", "home": home_a}}));
     host.call("hufu_profile_set", json!({"name": "codex-home", "profile": {"adapter": "codex-cli", "command": fake("codex"), "account": "home", "env_from": {"OPENAI_API_KEY": "HOME_KEY"}}}));
-    host.call("hufu_pool_set", json!({"name": "codex-any", "members": ["codex-work", "codex-home"], "strategy": "round-robin"}));
+    host.call(
+        "hufu_pool_set",
+        json!({"name": "codex-any", "members": ["codex-work", "codex-home"], "strategy": "round-robin"}),
+    );
     host.call("hufu_config_set", json!({"key": "roles.executors", "value": ["codex-any", "agy"]}));
     host.call("hufu_config_set", json!({"key": "roles.advisor", "value": "claude"}));
     host.call("hufu_config_set", json!({"key": "limits.max_concurrent_jobs", "value": 2}));
@@ -225,7 +267,13 @@ fn an_agent_can_configure_hufu() {
     assert_eq!(host.call("hufu_config_get", json!({"key": "pools.codex-any.strategy"}))["value"], "round-robin");
     assert_eq!(host.call("hufu_config_get", json!({}))["value"]["limits"]["max_concurrent_jobs"], 2);
     let agents = host.call("hufu_agents", json!({}));
-    let pool = agents["agents"].as_array().unwrap().iter().find(|a| a["name"] == "codex-any").expect("the pool is listed").clone();
+    let pool = agents["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "codex-any")
+        .expect("the pool is listed")
+        .clone();
     assert_eq!(pool["kind"], "pool");
     assert_eq!(strings(&pool["members"]), vec!["codex-work", "codex-home"]);
 
@@ -242,8 +290,14 @@ fn an_agent_can_configure_hufu() {
     let before = std::fs::read_to_string(env.home.join("config.yaml")).unwrap();
     assert!(host.call_err("hufu_config_set", json!({"key": "roles.advisor", "value": "nobody"})).contains("nobody"));
     assert!(host.call_err("hufu_config_set", json!({"key": "roles.advisor", "value": "codex-any"})).contains("pool"));
-    assert!(host.call_err("hufu_config_set", json!({"key": "defaults.permission", "value": "full-access"})).contains("full-access"));
-    assert!(host.call_err("hufu_profile_set", json!({"name": "bad", "profile": {"adapter": "telepathy"}})).contains("telepathy"));
+    assert!(
+        host.call_err("hufu_config_set", json!({"key": "defaults.permission", "value": "full-access"}))
+            .contains("full-access")
+    );
+    assert!(
+        host.call_err("hufu_profile_set", json!({"name": "bad", "profile": {"adapter": "telepathy"}}))
+            .contains("telepathy")
+    );
     assert!(host.call_err("hufu_pool_set", json!({"name": "p2", "members": ["ghost"]})).contains("ghost"));
     assert!(host.call_err("hufu_profile_remove", json!({"name": "codex-work"})).contains("codex-any"));
     assert!(host.call_err("hufu_profile_set", json!({"name": "leaky", "profile": {"adapter": "codex-cli", "vars": {"OPENAI_API_KEY": "sk-live-abcdefghijklmnop"}}})).to_lowercase().contains("secret"));
@@ -257,7 +311,10 @@ fn an_agent_can_configure_hufu() {
 
     // Doctor, with the self-test, and registration with another agent.
     let doctor = host.call("hufu_doctor", json!({"self_test": true}));
-    assert!(doctor["profiles"].as_array().unwrap().iter().any(|p| p["name"] == "codex" && p["installed"] == true), "{doctor}");
+    assert!(
+        doctor["profiles"].as_array().unwrap().iter().any(|p| p["name"] == "codex" && p["installed"] == true),
+        "{doctor}"
+    );
     assert!(doctor["self_test"].as_array().unwrap().iter().all(|t| t["ok"] == true), "{}", doctor["self_test"]);
     let printed = host.call("hufu_setup", json!({"agents": ["generic", "cursor"], "print": true}));
     assert!(printed["actions"][0]["detail"].as_str().unwrap().contains("mcpServers"));
@@ -274,7 +331,10 @@ fn an_agent_can_run_a_mission() {
         {"id": "a", "title": "A", "prompt": "p", "agent": "slow"},
         {"id": "b", "title": "B", "prompt": "p", "agent": "codex", "depends_on": ["a"]},
     ]});
-    let started = host.call("hufu_mission_start", json!({"goal": format!("Do both [[plan: {plan}]]"), "executors": ["slow", "codex"], "review": "never"}));
+    let started = host.call(
+        "hufu_mission_start",
+        json!({"goal": format!("Do both [[plan: {plan}]]"), "executors": ["slow", "codex"], "review": "never"}),
+    );
     let id = started["mission"].as_str().unwrap().to_string();
     assert_eq!(started["advisor"], "claude");
     let poll = |host: &mut Host, done: &dyn Fn(&Value) -> bool| -> Value {
@@ -297,7 +357,11 @@ fn an_agent_can_run_a_mission() {
     assert_eq!(done["state"], "succeeded", "{done}");
     assert!(done["report"].as_str().unwrap().contains("Do both"));
     assert_eq!(host.call("hufu_mission_status", json!({}))["missions"][0]["mission"], id);
-    assert_eq!(host.call("hufu_mission_abort", json!({"mission": id}))["state"], "succeeded", "aborting an ended mission changes nothing");
+    assert_eq!(
+        host.call("hufu_mission_abort", json!({"mission": id}))["state"],
+        "succeeded",
+        "aborting an ended mission changes nothing"
+    );
     assert!(host.call_err("hufu_mission_start", json!({"goal": "x", "advisor": "nobody"})).contains("nobody"));
 }
 
@@ -309,7 +373,10 @@ fn a_fresh_home_is_served_and_can_be_initialized() {
     let mut host = Host::start(&env, &[]);
     host.handshake();
     let agents = host.call("hufu_agents", json!({}));
-    assert!(agents["agents"].as_array().unwrap().iter().any(|a| a["name"] == "codex" && a["builtin"] == true), "the presets are there without a file: {agents}");
+    assert!(
+        agents["agents"].as_array().unwrap().iter().any(|a| a["name"] == "codex" && a["builtin"] == true),
+        "the presets are there without a file: {agents}"
+    );
     let init = host.call("hufu_init", json!({}));
     assert_eq!(init["action"], "created");
     assert!(env.home.join("config.yaml").exists());

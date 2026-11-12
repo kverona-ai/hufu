@@ -102,7 +102,9 @@ fn check_scope(grant: &Grant) -> Result<Vec<String>> {
     for app in &grant.apps {
         let n = norm(app);
         if n.is_empty() || n.contains('*') || n.contains('?') {
-            return Err(HufuError::usage(format!("`{app}` is not an application name; a `computer_use` grant names each application, without wildcards")));
+            return Err(HufuError::usage(format!(
+                "`{app}` is not an application name; a `computer_use` grant names each application, without wildcards"
+            )));
         }
         if REFUSED.contains(&n.as_str()) {
             return Err(HufuError::usage(format!(
@@ -116,7 +118,7 @@ fn check_scope(grant: &Grant) -> Result<Vec<String>> {
     Ok(warnings)
 }
 
-fn provided<'a>(profile: &'a Profile) -> Option<&'a Provided> {
+fn provided(profile: &Profile) -> Option<&Provided> {
     profile.provides.get(COMPUTER_USE)
 }
 
@@ -129,7 +131,9 @@ fn allowed_apps(provided: &Provided) -> std::result::Result<Option<Vec<String>>,
     } else {
         return Ok(None);
     };
-    let Some(program) = proc::which(&argv[0]).or_else(|| std::path::Path::new(&argv[0]).is_file().then(|| argv[0].clone().into())) else {
+    let Some(program) =
+        proc::which(&argv[0]).or_else(|| std::path::Path::new(&argv[0]).is_file().then(|| argv[0].clone().into()))
+    else {
         return Err(format!("`{}` is not installed or not on PATH", argv[0]));
     };
     let mut cmd = proc::command_for(&program);
@@ -143,7 +147,11 @@ fn allowed_apps(provided: &Provided) -> std::result::Result<Option<Vec<String>>,
                 .map(norm)
                 .collect(),
         )),
-        Ok(out) => Err(format!("`{}` failed: {}", argv.join(" "), proc::tail(if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr }, 300))),
+        Ok(out) => Err(format!(
+            "`{}` failed: {}",
+            argv.join(" "),
+            proc::tail(if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr }, 300)
+        )),
         Err(e) => Err(format!("`{}` could not be run: {e}", argv.join(" "))),
     }
 }
@@ -191,7 +199,10 @@ pub fn resolve(
 ) -> Result<Resolved> {
     for grant in grants {
         if grant.capability != COMPUTER_USE {
-            return Err(HufuError::usage(format!("unknown capability `{}` in `grants`; accepted: computer_use", grant.capability)));
+            return Err(HufuError::usage(format!(
+                "unknown capability `{}` in `grants`; accepted: computer_use",
+                grant.capability
+            )));
         }
     }
     let mut apps: Vec<String> = Vec::new();
@@ -206,7 +217,9 @@ pub fn resolve(
     }
     if grants.is_empty() {
         if over.is_some() {
-            return Err(HufuError::usage("`computer_use` routing was given, but the task has no `computer_use` grant; add `grants: [{capability: computer_use, apps: [...]}]`"));
+            return Err(HufuError::usage(
+                "`computer_use` routing was given, but the task has no `computer_use` grant; add `grants: [{capability: computer_use, apps: [...]}]`",
+            ));
         }
         return Ok(Resolved::default());
     }
@@ -223,7 +236,12 @@ pub fn resolve(
             ));
         };
         warnings.extend(preflight(executor, &apps)?);
-        Ok(ComputerUsePlan { route: Route::Executor, agent: executor.name.clone(), apps: apps.clone(), via: p.via.clone() })
+        Ok(ComputerUsePlan {
+            route: Route::Executor,
+            agent: executor.name.clone(),
+            apps: apps.clone(),
+            via: p.via.clone(),
+        })
     };
 
     let plan = match route {
@@ -237,14 +255,24 @@ pub fn resolve(
                     return Err(format!("computer-use agent `{name}` is not a profile"));
                 };
                 let Some(p) = provided(profile) else {
-                    return Err(format!("profile `{name}` does not declare `provides.computer_use`, so it cannot serve computer use"));
+                    return Err(format!(
+                        "profile `{name}` does not declare `provides.computer_use`, so it cannot serve computer use"
+                    ));
                 };
                 if profile.name == executor.name {
                     // The executor is the configured operator: no hand-over is needed.
                     warnings.extend(preflight(executor, &apps)?);
-                    return Ok(ComputerUsePlan { route: Route::Executor, agent: executor.name.clone(), apps: apps.clone(), via: p.via.clone() });
+                    return Ok(ComputerUsePlan {
+                        route: Route::Executor,
+                        agent: executor.name.clone(),
+                        apps: apps.clone(),
+                        via: p.via.clone(),
+                    });
                 }
-                let accepts = adapters.get(&executor.adapter).map(|a| a.capabilities(executor).accepts_mcp_servers).unwrap_or(false);
+                let accepts = adapters
+                    .get(&executor.adapter)
+                    .map(|a| a.capabilities(executor).accepts_mcp_servers)
+                    .unwrap_or(false);
                 if !accepts {
                     return Err(format!(
                         "adapter `{}` cannot attach Hufu's hand-over tool to the executor's session, so profile `{}` cannot delegate computer use",
@@ -252,12 +280,19 @@ pub fn resolve(
                     ));
                 }
                 warnings.extend(preflight(profile, &apps)?);
-                Ok(ComputerUsePlan { route: Route::Dedicated, agent: name.clone(), apps: apps.clone(), via: p.via.clone() })
+                Ok(ComputerUsePlan {
+                    route: Route::Dedicated,
+                    agent: name.clone(),
+                    apps: apps.clone(),
+                    via: p.via.clone(),
+                })
             })();
             match dedicated {
                 Ok(plan) => plan,
                 Err(why) if cu.when_unavailable == WhenUnavailable::Executor && provided(executor).is_some() => {
-                    let plan = executor_plan(&mut warnings).map_err(|e| HufuError::usage(format!("{why}; the fallback to the executor also failed: {e}")))?;
+                    let plan = executor_plan(&mut warnings).map_err(|e| {
+                        HufuError::usage(format!("{why}; the fallback to the executor also failed: {e}"))
+                    })?;
                     warnings.push(format!("computer use falls back to the executor's own agent: {why}"));
                     plan
                 }
@@ -303,7 +338,10 @@ pub fn operator_prompt(apps: &[String], instruction: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{check_raw, parse_yaml};
-    use hufu_contract::{Adapter, AdapterError, CancelToken, Capabilities, EventSink, LaunchPlan, ProbeResult, RunOutcome, RunRequest, StructuredOutput, Tier};
+    use hufu_contract::{
+        Adapter, AdapterError, CancelToken, Capabilities, EventSink, LaunchPlan, ProbeResult, RunOutcome, RunRequest,
+        StructuredOutput, Tier,
+    };
 
     struct Fake(&'static str, bool);
     impl Adapter for Fake {
@@ -415,7 +453,12 @@ mod tests {
         assert!(err.message.contains("cannot attach"), "{}", err.message);
         // Nothing configured at all.
         let none = config("");
-        assert!(resolve(&none, &Reg, &none.profiles["plain"], &grant(&["Figma"]), None).unwrap_err().message.contains("no computer-use agent is configured"));
+        assert!(
+            resolve(&none, &Reg, &none.profiles["plain"], &grant(&["Figma"]), None)
+                .unwrap_err()
+                .message
+                .contains("no computer-use agent is configured")
+        );
     }
 
     #[test]

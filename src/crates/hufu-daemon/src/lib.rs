@@ -13,9 +13,9 @@ use hufu_contract::{proc, reason};
 use hufu_core::config::{self, Config, Home};
 use hufu_core::error::{HufuError, Result};
 use hufu_core::ops::{self, PruneOptions};
+use hufu_core::slots;
 use hufu_core::store::{self, State};
 use hufu_core::submit::{self, DaemonInfo};
-use hufu_core::slots;
 
 fn stop_marker(home: &Home) -> std::path::PathBuf {
     home.run().join("daemon.stop")
@@ -29,10 +29,16 @@ pub fn status(home: &Home) -> Option<DaemonInfo> {
 /// Starts queued jobs while there is room, oldest first. Returns how many were started.
 pub fn start_queued(home: &Home, config: &Config, launched: &mut BTreeMap<String, Instant>) -> usize {
     let jobs = store::list_jobs(home);
-    launched.retain(|id, at| jobs.iter().any(|j| &j.id == id && j.state == State::Queued && j.runner_pid.is_none()) && at.elapsed() < Duration::from_secs(30));
+    launched.retain(|id, at| {
+        jobs.iter().any(|j| &j.id == id && j.state == State::Queued && j.runner_pid.is_none())
+            && at.elapsed() < Duration::from_secs(30)
+    });
     let mut busy = slots::live(home).iter().filter(|s| s.counted).count() + launched.len();
     let mut started = 0;
-    for job in jobs.iter().filter(|j| j.state == State::Queued && j.runner_pid.is_none() && j.queue.as_deref() == Some("daemon")) {
+    for job in jobs
+        .iter()
+        .filter(|j| j.state == State::Queued && j.runner_pid.is_none() && j.queue.as_deref() == Some("daemon"))
+    {
         if launched.contains_key(&job.id) {
             continue;
         }
@@ -40,7 +46,7 @@ pub fn start_queued(home: &Home, config: &Config, launched: &mut BTreeMap<String
             let _ = hufu_core::runner::cancel(home, &job.id);
             continue;
         }
-        if busy >= config.limits.max_concurrent_jobs {
+        if busy >= config.limits.max_concurrent_jobs.max(1) {
             break;
         }
         if submit::launch(home, &job.id).is_ok() {
@@ -62,7 +68,9 @@ pub fn requeue_lost(home: &Home, since_ms: u64) -> usize {
         if job.finished_at.as_deref().and_then(parse_rfc3339).unwrap_or(0) < since_ms {
             continue;
         }
-        let Ok(spec) = store::load_spec(home, &job.id) else { continue };
+        let Ok(spec) = store::load_spec(home, &job.id) else {
+            continue;
+        };
         if job.attempt >= spec.retry.max_attempts || store::cancel_requested(home, &job.id) {
             continue;
         }
@@ -90,7 +98,12 @@ pub fn run(home: &Home, version: &str) -> Result<()> {
         }
     }
     let _ = std::fs::remove_file(stop_marker(home));
-    let mut info = DaemonInfo { pid: std::process::id(), started_at: now_rfc3339(), version: version.to_string(), heartbeat_at: Some(now_rfc3339()) };
+    let mut info = DaemonInfo {
+        pid: std::process::id(),
+        started_at: now_rfc3339(),
+        version: version.to_string(),
+        heartbeat_at: Some(now_rfc3339()),
+    };
     store::write_json(&submit::daemon_file(home), &info)?;
     let mut beat = Instant::now();
     let started_ms = hufu_contract::time::now_ms();

@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use hufu_contract::{Adapter, CancelReason, CancelToken, Effort, EventBody, EventSink, Profile, RawStream, RunOutcome, RunRequest, RunStatus, Tier, proc, reason};
+use hufu_contract::{
+    Adapter, CancelReason, CancelToken, Effort, EventBody, EventSink, Profile, RawStream, RunOutcome, RunRequest,
+    RunStatus, Tier, proc, reason,
+};
 
 /// A sink that keeps everything in memory.
 #[derive(Default)]
@@ -45,7 +48,12 @@ pub struct Subject<'a> {
 
 impl Subject<'_> {
     pub fn profile(&self) -> Profile {
-        let mut p = Profile { name: "subject".into(), adapter: self.adapter.kind().to_string(), command: self.fake.clone(), ..Profile::default() };
+        let mut p = Profile {
+            name: "subject".into(),
+            adapter: self.adapter.kind().to_string(),
+            command: self.fake.clone(),
+            ..Profile::default()
+        };
         (self.tune)(&mut p);
         p
     }
@@ -88,12 +96,17 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
 
     // C1: every supported tier has its own explicit invocation.
     out.push(("C1", {
-        let plans: Vec<_> = caps.permission_tiers.iter().map(|t| (*t, s.adapter.plan(&profile, &s.request("ok", *t)))).collect();
+        let plans: Vec<_> =
+            caps.permission_tiers.iter().map(|t| (*t, s.adapter.plan(&profile, &s.request("ok", *t)))).collect();
         let all_ok = plans.iter().all(|(_, p)| p.is_ok());
         // The tier may be spelled in the arguments or in what is sent on stdin.
-        let args: Vec<(Vec<String>, Option<String>)> = plans.iter().filter_map(|(_, p)| p.as_ref().ok().map(|p| (p.args.clone(), p.stdin.clone()))).collect();
-        let distinct = caps.checked_at_runtime || args.iter().enumerate().all(|(i, a)| args.iter().skip(i + 1).all(|b| a != b));
-        expect(!caps.permission_tiers.is_empty() && all_ok && distinct, || format!("plans for {:?} are missing or identical: {plans:?}", caps.permission_tiers))
+        let args: Vec<(Vec<String>, Option<String>)> =
+            plans.iter().filter_map(|(_, p)| p.as_ref().ok().map(|p| (p.args.clone(), p.stdin.clone()))).collect();
+        let distinct =
+            caps.checked_at_runtime || args.iter().enumerate().all(|(i, a)| args.iter().skip(i + 1).all(|b| a != b));
+        expect(!caps.permission_tiers.is_empty() && all_ok && distinct, || {
+            format!("plans for {:?} are missing or identical: {plans:?}", caps.permission_tiers)
+        })
     }));
 
     // C2: an unsupported tier is never launched.
@@ -127,15 +140,26 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
     // C4: exit 0 without a final message is a failure.
     out.push(("C4", {
         let (o, _) = s.run(&s.request("empty", tier));
-        expect(o.status == RunStatus::Failed && o.reason.as_deref() == Some(reason::EMPTY_OUTPUT), || format!("expected failed/empty_output, got {:?}/{:?}", o.status, o.reason))
+        expect(o.status == RunStatus::Failed && o.reason.as_deref() == Some(reason::EMPTY_OUTPUT), || {
+            format!("expected failed/empty_output, got {:?}/{:?}", o.status, o.reason)
+        })
     }));
 
     // C5: a skipped action is reported.
     out.push(("C5", {
         if caps.reports_denials {
-            let (o, sink) = s.run(&s.request("deny", tier.min(Tier::WorkspaceWrite).max(caps.permission_tiers.iter().copied().min().unwrap_or(tier))));
-            let event = sink.events.lock().map(|e| e.iter().any(|e| matches!(e, EventBody::PermissionDenied { .. }))).unwrap_or(false);
-            expect(!o.denied_actions.is_empty() && event, || format!("expected a denied action and a permission.denied event, got {:?}", o.denied_actions))
+            let (o, sink) = s.run(&s.request(
+                "deny",
+                tier.min(Tier::WorkspaceWrite).max(caps.permission_tiers.iter().copied().min().unwrap_or(tier)),
+            ));
+            let event = sink
+                .events
+                .lock()
+                .map(|e| e.iter().any(|e| matches!(e, EventBody::PermissionDenied { .. })))
+                .unwrap_or(false);
+            expect(!o.denied_actions.is_empty() && event, || {
+                format!("expected a denied action and a permission.denied event, got {:?}", o.denied_actions)
+            })
         } else {
             Ok(())
         }
@@ -156,18 +180,28 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
         });
         (o, pid, started.elapsed())
     };
-    out.push(("C6", expect(hang.0.status == RunStatus::Cancelled && hang.2 < proc::kill_grace() + Duration::from_secs(8), || format!("expected cancelled, got {:?} after {:?}", hang.0.status, hang.2))));
+    out.push((
+        "C6",
+        expect(hang.0.status == RunStatus::Cancelled && hang.2 < proc::kill_grace() + Duration::from_secs(8), || {
+            format!("expected cancelled, got {:?} after {:?}", hang.0.status, hang.2)
+        }),
+    ));
     out.push(("C7", {
         std::thread::sleep(Duration::from_millis(200));
-        expect(hang.1.map(|p| !proc::pid_alive(p)).unwrap_or(false), || format!("the agent process {:?} survived the cancellation", hang.1))
+        expect(hang.1.map(|p| !proc::pid_alive(p)).unwrap_or(false), || {
+            format!("the agent process {:?} survived the cancellation", hang.1)
+        })
     }));
 
     // C8: a missing login is reported as such, with a hint, and does not hang.
     out.push(("C8", {
         let (o, _) = s.run(&s.request("auth", tier));
-        expect(o.status == RunStatus::Failed && o.reason.as_deref() == Some(reason::AUTH_REQUIRED) && o.detail.as_deref().map(|d| !d.is_empty()).unwrap_or(false), || {
-            format!("expected failed/auth_required with a hint, got {:?}/{:?}: {:?}", o.status, o.reason, o.detail)
-        })
+        expect(
+            o.status == RunStatus::Failed
+                && o.reason.as_deref() == Some(reason::AUTH_REQUIRED)
+                && o.detail.as_deref().map(|d| !d.is_empty()).unwrap_or(false),
+            || format!("expected failed/auth_required with a hint, got {:?}/{:?}: {:?}", o.status, o.reason, o.detail),
+        )
     }));
 
     // C9: malformed output does not crash the adapter.
@@ -182,7 +216,10 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
         let raw = sink.stdout.lock().map(|l| l.join("\n")).unwrap_or_default();
         // An agent may stream its answer in pieces, so look for both ends of the marker.
         let kept = raw.contains("raw-marker-7f3a") || (raw.contains("raw-") && raw.contains("7f3a"));
-        expect(o.status == RunStatus::Succeeded && o.final_message.as_deref() == Some("raw-marker-7f3a") && kept, || format!("the raw log does not contain the agent's output: {:?} {raw}", o.reason))
+        expect(
+            o.status == RunStatus::Succeeded && o.final_message.as_deref() == Some("raw-marker-7f3a") && kept,
+            || format!("the raw log does not contain the agent's output: {:?} {raw}", o.reason),
+        )
     }));
 
     // C11: a follow-up reaches the agent's own resume mechanism, or the capability is absent.
@@ -191,23 +228,32 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
         req.resume_session = Some("sess-42".into());
         if caps.resume {
             let (o, _) = s.run(&req);
-            expect(o.final_message.as_deref().map(|m| m.contains("resumed sess-42")).unwrap_or(false), || format!("the session id did not reach the agent: {:?}", o.final_message))
+            expect(o.final_message.as_deref().map(|m| m.contains("resumed sess-42")).unwrap_or(false), || {
+                format!("the session id did not reach the agent: {:?}", o.final_message)
+            })
         } else {
-            expect(s.adapter.plan(&profile, &req).is_err(), || "resume is not supported, but a launch plan with a session was produced".into())
+            expect(s.adapter.plan(&profile, &req).is_err(), || {
+                "resume is not supported, but a launch plan with a session was produced".into()
+            })
         }
     }));
 
     // C12: nothing outside the request's environment reaches the agent.
     out.push(("C12", {
         let req = s.request("ok", tier);
-        let stray = std::env::vars().map(|(k, _)| k).find(|k| !req.env.keys().any(|e| e.eq_ignore_ascii_case(k)) && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+        let stray = std::env::vars().map(|(k, _)| k).find(|k| {
+            !req.env.keys().any(|e| e.eq_ignore_ascii_case(k))
+                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
         match stray {
             None => Ok(()),
             Some(var) => {
                 let mut req = s.request(&format!("env={var}"), tier);
                 req.env.remove("HUFU_FAKE_SCENARIO");
                 let (o, _) = s.run(&req);
-                expect(o.final_message.as_deref() == Some(format!("{var}=<unset>").as_str()), || format!("`{var}` leaked into the agent: {:?} ({:?})", o.final_message, o.detail))
+                expect(o.final_message.as_deref() == Some(format!("{var}=<unset>").as_str()), || {
+                    format!("`{var}` leaked into the agent: {:?} ({:?})", o.final_message, o.detail)
+                })
             }
         }
     }));
