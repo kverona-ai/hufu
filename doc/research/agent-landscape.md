@@ -57,7 +57,7 @@ All facts in this section are ✅ from `agentclientprotocol.com` (protocol v1 pa
 | Language | Package | Note |
 |---|---|---|
 | TypeScript | `@agentclientprotocol/sdk` (npm, 2.6.0, Apache-2.0) | Reference implementation; Gemini CLI's ACP code is built on it |
-| Rust | `agent-client-protocol` (crates.io) | |
+| Rust | `agent-client-protocol` (crates.io, 5.2.0) | The SDK Hufu uses ([ADR-0007](../adr/0007-implement-in-rust.md)) |
 | Python | `agent-client-protocol` (PyPI) | |
 | Kotlin, Java | Library pages exist | Package names not checked |
 | Go | ❓ | No official page found |

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed.** Waiting for the project owner's confirmation |
+| **Status** | **Superseded** by [ADR-0007](0007-implement-in-rust.md) before it was accepted. Kept for the comparison of options |
 | **Date** | 2026-11-12 |
 
 ## Context

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Assessment and recommendation |
-| **Assessed on** | 2026-11-12 |
+| **Assessed on** | 2026-11-12 (updated for Rust) |
 | **Related** | [Deployment](deployment.md), [Roadmap](../roadmap.md) |
 
 This repository is developed partly from Claude Code cloud sessions. Each session runs in a
@@ -19,7 +19,7 @@ have its own instead of sharing `Default`.
 | Network | Limited. Package managers allowed; no additional allowed domains |
 | Environment variables | None |
 | Setup script | None |
-| Tooling found in the container | Node.js 22.23, npm 10.9, pnpm, Bun, Go, Rust (cargo), Python 3, Git, Chromium with Playwright |
+| Tooling found in the container | Rust 1.97 (rustc and cargo), Node.js 22.23, npm, pnpm, Go, Python 3, Git, Chromium with Playwright |
 
 Other projects in the same account already have their own environments. `hufu` does not.
 
@@ -28,10 +28,11 @@ Other projects in the same account already have their own environments. `hufu` d
 | Phase | Needs from the environment | Does `Default` cover it? |
 |---|---|---|
 | **M0: documentation** (now) | Git and Markdown only | **Yes.** Vendor documentation sites are blocked by the limited network, but research can go through web search and fetch tools, which do not depend on the container's network |
-| **M1 to M4: building Hufu** | Node.js ≥ 22.19 and pnpm (both present); dependencies installed before the session starts; npm registry access (allowed) | Works, but every session would reinstall dependencies by hand. A setup script fixes that, and a repository's setup script does not belong in a shared environment |
+| **M1 to M4: building Hufu** | A Rust toolchain (present); crates fetched and ideally a first build done before the session starts; crates.io access (allowed as a package manager) | Works, but every session would download and compile all dependencies from scratch, which is slow for Rust. A setup script fixes that, and a repository's setup script does not belong in a shared environment |
 | **Fake-agent and conformance tests** | Nothing beyond the above. They run against scripted fakes | Yes |
 | **Live tests with API-key agents** (pi with OpenRouter or DeepSeek, Cursor or Codex with an API key) | Provider API keys as secrets; the providers' API hosts on the allow-list; the agent CLIs installed | **No.** `Default` has no secrets and allows no extra hosts, and these should not be added to an environment every repository shares |
 | **Live tests with subscription logins** (`agy`, Kimi Code, Codex or Claude on a subscription) | An interactive browser login stored in the user's home directory | **Not possible in any cloud container.** These run on the developer's own machine |
+| **Computer-use tests** (M5) | A real desktop session, a computer-use runtime and applications approved by a person | **Not possible in a cloud container.** These run on a supported machine with someone present |
 
 ## 3. Recommendation
 
@@ -56,7 +57,7 @@ Other projects in the same account already have their own environments. `hufu` d
 | Setup script | See below | M1 |
 | Allowed domains | None at first. Add provider API hosts only when live tests for that provider are written, for example `openrouter.ai`, `api.deepseek.com` | M2 |
 | Secrets | Provider API keys for live tests, for example an OpenRouter key | M2 |
-| Environment variables | `HUFU_HOME=/tmp/hufu-home` so tests never touch a real home directory | M1 |
+| Environment variables | `HUFU_HOME=/tmp/hufu-home` so tests never touch a real home directory; `CARGO_TERM_COLOR=never` for readable logs | M1 |
 
 Setup script sketch:
 
@@ -64,9 +65,9 @@ Setup script sketch:
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)/src"
-corepack enable
-if [ -f pnpm-lock.yaml ]; then
-  pnpm install --frozen-lockfile
+if [ -f Cargo.lock ]; then
+  cargo fetch --locked
+  cargo build --workspace --all-targets --locked   # warm the build cache
 fi
 ```
 
@@ -93,7 +94,7 @@ transcripts: they are the only tests that run everywhere.
 
 ## 5. Revisit when
 
-- The first `package.json` lands under `src/`: create the environment and its setup script.
+- The first `Cargo.toml` lands under `src/`: create the environment and its setup script.
 - The first live test against an API-key agent is written: add that provider's host and secret.
 - A vendor documentation host is needed inside the container for an automated check: add that one
   host, not a wider policy.

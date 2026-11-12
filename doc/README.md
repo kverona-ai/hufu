@@ -15,11 +15,12 @@ All project documents live in this directory. Code lives in [`src/`](../src/READ
 ```text
 doc/
 ├── README.md                     this index
-├── roadmap.md                    milestones M0 to M4
+├── roadmap.md                    milestones M0 to M5
 ├── requirements/
 │   └── requirements.md           goals, users, scenarios, FR and NFR lists, open questions
 ├── research/
 │   ├── agent-landscape.md        how each agent is driven headlessly; ACP; verified facts
+│   ├── computer-use.md           reference study of LCU for the planned computer-use routing
 │   └── prior-art.md              existing orchestrators, positioning, the name
 ├── architecture/
 │   └── architecture.md           components, roles, job and mission lifecycles, security
@@ -43,6 +44,7 @@ doc/
 - [Agent landscape](research/agent-landscape.md): what Codex, Cursor, Antigravity, Kimi Code, pi and
   others offer for non-interactive use, with the evidence level of each claim
 - [Prior art, positioning and naming](research/prior-art.md)
+- [Computer use: reference study of LCU](research/computer-use.md)
 
 ### Architecture
 - [Architecture](architecture/architecture.md)

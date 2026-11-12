@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Plan. Hufu has no release yet, so the commands below describe the intended experience |
-| **Last updated** | 2026-11-12 |
+| **Last updated** | 2026-11-12 (install channels for a Rust binary) |
 | **Related** | [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
 
 Hufu is deployed on a developer's own machine, next to the agents it drives. There is no server to
@@ -44,13 +44,14 @@ flowchart LR
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Node.js | ≥ 22.19 | Floor set by pi |
+| Hufu | One self-contained binary | No language runtime is needed for Hufu itself |
 | Git | Any recent | Required for worktree isolation and change detection |
 | At least one agent CLI | See below | Installed and logged in by the user |
-| Operating system | macOS or Linux | Windows is not a target before M4 |
+| Operating system | macOS or Linux, x86-64 or ARM64 | Windows is not a target before M4 |
 
 Agents are installed and authenticated the way their vendors document. Hufu does not install them
-and does not log in for the user.
+and does not log in for the user. Some agents need Node.js; that is the agent's requirement, not
+Hufu's.
 
 | Agent | Install (per vendor) | Log in once |
 |---|---|---|
@@ -58,14 +59,22 @@ and does not log in for the user.
 | Antigravity | Vendor installer | Run `agy` interactively once |
 | Cursor | `curl https://cursor.com/install -fsS \| bash` | `agent login`, or set `CURSOR_API_KEY` |
 | Kimi Code | Vendor installer | `kimi login` |
-| pi | `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` | Provider API key in the environment |
+| pi | `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` (needs Node.js ≥ 22.19) | Provider API key in the environment |
 
 ## 3. Install
 
-Planned for the first release (M1):
+Planned channels for the first release (M1). The crate is `hufu-cli`; the command is `hufu`.
+
+| Channel | Command | Notes |
+|---|---|---|
+| Install script | `curl -fsSL <release-url>/install.sh \| sh` | Downloads the prebuilt binary for the platform and verifies its checksum |
+| Homebrew | `brew install kverona-ai/tap/hufu` | macOS and Linux |
+| Cargo | `cargo install hufu-cli` | Builds from source; needs a Rust toolchain |
+| npm | `npm install -g hufu` | Optional thin installer that fetches the same binary; the npm name is free as of 2026-11-12 |
+
+After installing:
 
 ```bash
-npm install -g hufu        # the npm name is free as of 2026-11-12 and still to be reserved
 hufu doctor                # finds installed agents, prints versions and login state
 ```
 
@@ -74,8 +83,8 @@ From source, once code exists:
 ```bash
 git clone https://github.com/kverona-ai/hufu.git
 cd hufu/src
-pnpm install && pnpm build
-pnpm link --global
+cargo build --release
+install -m 755 target/release/hufu ~/.local/bin/hufu
 ```
 
 ## 4. Configure
@@ -99,7 +108,7 @@ pnpm link --global
 
 ### Claude Code (M1)
 
-Two options ship with the package under `src/integrations/claude-code/`:
+Two options ship with each release, from `src/integrations/claude-code/`:
 
 - **Skill.** Installs a skill that teaches Claude when to delegate and how to use `hufu run`,
   `hufu wait` and `hufu result`.
@@ -163,8 +172,8 @@ to that user.
 | Clean up old jobs | `hufu prune --older-than 30d` |
 | Remove finished worktrees | `hufu prune --worktrees` |
 | Back up | Copy `~/.hufu/config.yaml`. Job data is disposable |
-| Upgrade | `npm install -g hufu@latest`, then `hufu doctor` |
-| Uninstall | `npm uninstall -g hufu`, then delete `~/.hufu` |
+| Upgrade | Re-run the install channel used (`brew upgrade hufu`, `cargo install hufu-cli`, or the install script), then `hufu doctor` |
+| Uninstall | Remove the `hufu` binary, then delete `~/.hufu` |
 
 **Disk use.** A job directory holds the raw agent output, which can reach tens of megabytes for
 long runs. Prune on a schedule.
@@ -184,9 +193,12 @@ long runs. Prune on a schedule.
 
 Planned from M1:
 
-- Versions are tagged in Git; the npm package is published from `src/` by CI on tag.
-- CI on every pull request: type check, lint, unit tests, fake-agent tests, the conformance suite
-  and a Markdown link check for `doc/`.
+- Versions are tagged in Git. CI builds release binaries for macOS and Linux on x86-64 and ARM64,
+  attaches them to a GitHub Release with checksums, and publishes the `hufu-cli` crate. A release
+  tool such as `cargo-dist` is the candidate for this pipeline.
+- CI on every pull request: `cargo fmt --check`, `cargo clippy`, unit tests, fake-agent tests, the
+  conformance suite and a Markdown link check for `doc/`.
 - Live smoke tests run on a maintainer's machine before each release, because they need real
   logins. Their results are attached to the release notes.
-- The npm name `hufu` should be reserved before the first public announcement.
+- Names to reserve before the first public announcement: `hufu-cli` on crates.io, and `hufu` on npm
+  for the optional installer.

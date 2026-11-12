@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for review. Nothing here is implemented yet |
-| **Last updated** | 2026-11-12 |
+| **Last updated** | 2026-11-12 (Rust, capability routing) |
 | **Related** | [Architecture](../architecture/architecture.md), [Adapter contract](adapter-contract.md), [Requirements](../requirements/requirements.md) |
 
 This document turns the [architecture](../architecture/architecture.md) into concrete formats and
@@ -15,54 +15,55 @@ in the [adapter contract](adapter-contract.md).
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Language | TypeScript, strict mode | [ADR-0003](../adr/0003-typescript-on-node.md) |
-| Runtime | Node.js ≥ 22.19 | The floor is set by pi, the strictest of the target agents |
-| Package manager | pnpm | |
-| Schemas | Zod, exported as JSON Schema | One definition validates config, task specs and CLI JSON output |
-| CLI framework | A small, dependency-light parser (to be picked in M1) | |
-| ACP client | `@agentclientprotocol/sdk` | |
-| MCP server | `@modelcontextprotocol/sdk` | M4 |
-| Tests | Vitest | |
-| Build | `tsc` to ESM; single `hufu` bin | |
-| Pseudo-terminal | Optional dependency, only if the `agy` adapter needs it | See [adapter contract](adapter-contract.md#52-antigravity-agy-cli) |
+| Language | Rust, stable toolchain, edition 2024 | [ADR-0007](../adr/0007-implement-in-rust.md) |
+| Async runtime | Tokio | Subprocesses, pipes, signals and timers |
+| CLI | `clap` | |
+| Serialization | `serde`, `serde_json`; a maintained YAML crate to be picked in M1 | The original `serde_yaml` crate is deprecated |
+| Schemas | `schemars` | JSON Schema generated from the same Rust types that parse config, task specs and CLI output |
+| ACP client | `agent-client-protocol` | Official Rust SDK |
+| MCP server | `rmcp` | Official Rust SDK. M4 |
+| Process control | Tokio process plus `nix` | Detached sessions, process groups, signal delivery |
+| Pseudo-terminal | `portable-pty`, only if the `agy` adapter needs it | See [adapter contract](adapter-contract.md#52-antigravity-agy-cli) |
+| Tests | `cargo test`; `assert_cmd` for command-level tests | Fake agents are small binaries in the testing crate |
+| Distribution | One static `hufu` binary per platform | See [deployment](../deployment/deployment.md#3-install) |
+
+The toolchain version is pinned in `rust-toolchain.toml`.
 
 ## 2. Source layout
 
-All code, including its manifests and tests, lives under [`src/`](../../src/README.md), which is the
-package root. The repository root holds only documentation and repository metadata.
+All code, including its manifests and tests, lives under [`src/`](../../src/README.md), which is a
+Cargo workspace. The repository root holds only documentation and repository metadata.
 
 ```text
 src/
-├── package.json            # package "hufu", bin: hufu
-├── tsconfig.json
-├── cli/                    # command definitions, human and JSON output, exit codes
-├── core/
-│   ├── spec/               # task spec, config and result schemas; validation
-│   ├── registry/           # profiles, adapter lookup, capability cache
-│   ├── store/              # job and mission directories, atomic writes
-│   ├── runner/             # detached per-job runner: lifecycle, heartbeat, timeout, cancel
-│   ├── scheduler/          # queue, concurrency slots, dependency release
-│   ├── workspace/          # cwd resolution, git worktrees, change detection
-│   ├── tally/              # acceptance checks
-│   └── mission/            # advisor loop, plan and verdict handling, budgets
-├── adapters/
-│   ├── contract.ts         # the Adapter interface and shared types
-│   ├── acp/                # generic ACP client adapter
-│   ├── codex-cli/
-│   ├── agy-cli/
-│   ├── cursor-cli/
-│   ├── kimi-cli/
-│   ├── pi/
-│   └── claude-cli/
-├── mcp/                    # MCP shell (M4)
-├── daemon/                 # daemon (M4)
-├── integrations/
-│   └── claude-code/        # skill and CLAUDE.md snippet shipped with the package
-└── testing/                # fake agents, recorded transcripts, conformance suite
+├── Cargo.toml              # workspace manifest
+├── Cargo.lock
+├── rust-toolchain.toml
+├── crates/
+│   ├── hufu-cli/           # the `hufu` binary: commands, human and JSON output, exit codes
+│   ├── hufu-core/          # everything agent-agnostic
+│   │   └── src/
+│   │       ├── spec/       # task spec, config and result types; validation
+│   │       ├── registry/   # profiles, adapter lookup, capability cache
+│   │       ├── store/      # job and mission directories, atomic writes
+│   │       ├── runner/     # detached per-job runner: lifecycle, heartbeat, timeout, cancel
+│   │       ├── scheduler/  # queue, concurrency slots, dependency release
+│   │       ├── workspace/  # cwd resolution, git worktrees, change detection
+│   │       ├── tally/      # acceptance checks
+│   │       └── mission/    # advisor loop, plan and verdict handling, budgets
+│   ├── hufu-contract/      # the Adapter trait and the types shared with adapters
+│   ├── hufu-adapters/      # one module per adapter
+│   │   └── src/            # acp, codex_cli, agy_cli, cursor_cli, kimi_cli, pi, claude_cli
+│   ├── hufu-mcp/           # MCP shell (M4)
+│   ├── hufu-daemon/        # daemon (M4)
+│   └── hufu-testing/       # fake agents, recorded transcripts, conformance suite
+└── integrations/
+    └── claude-code/        # skill and CLAUDE.md snippet shipped with releases
 ```
 
-Dependency rule: `cli`, `mcp` and `daemon` depend on `core`; `core` depends on
-`adapters/contract.ts` only; concrete adapters depend on the contract and nothing in `core`.
+Dependency rule, enforced by the crate graph: `hufu-core` and `hufu-adapters` each depend on
+`hufu-contract` and not on each other. `hufu-cli`, `hufu-mcp` and `hufu-daemon` depend on
+`hufu-core` and wire the adapters in.
 
 ## 3. Configuration
 
@@ -171,6 +172,7 @@ acceptance:
 | `strict_permissions` | no | `true` | When `true`, any denied action fails the job |
 | `depends_on` | no | | Job ids that must succeed first. Used by missions |
 | `labels` | no | | Free-form key/value pairs for filtering |
+| `grants` | no | none | Capabilities beyond the workspace that this task may use, each with its scope. Planned; see [section 14](#14-capability-routing-planned) |
 
 **Validation order.** Schema, then profile resolution, then capability checks (tier, effort, model,
 structured output, resume), then workspace checks (directory exists; a git repository if
@@ -440,8 +442,8 @@ No tool call ever lasts as long as a job. That keeps Hufu inside every host's to
 
 | Layer | What | How |
 |---|---|---|
-| Unit | Spec validation, capability checks, tier and effort mapping, store atomicity | Vitest, no processes |
-| Fake agents | Runner and adapters against scripted agents | A fake ACP agent and fake CLI binaries in `src/testing/` that replay recorded transcripts, including the bad cases: exit 0 with no output, soft-denied actions, a hang, a crash mid-stream, malformed JSON |
+| Unit | Spec validation, capability checks, tier and effort mapping, store atomicity | `cargo test`, no processes |
+| Fake agents | Runner and adapters against scripted agents | A fake ACP agent and fake CLI binaries in the `hufu-testing` crate that replay recorded transcripts, including the bad cases: exit 0 with no output, soft-denied actions, a hang, a crash mid-stream, malformed JSON |
 | Conformance | Every adapter passes one shared suite | Same assertions for all adapters: explicit tier flags, refusal of unsupported tiers and effort levels, cancel within the grace period, timeout enforcement, final message present |
 | Durability | Jobs outlive callers; lost jobs are detected | Kill the caller; kill the runner; check the store |
 | Live smoke | Real agents | Opt-in (`HUFU_LIVE=1`), run on a machine where the agents are installed and logged in. Never in default CI |
@@ -455,3 +457,91 @@ version newer than any recorded one, it says so.
 - The CLI follows semantic versioning from 1.0. Before that, breaking changes are listed in the
   changelog.
 - Adapters record the range of agent versions they were tested against.
+
+## 14. Capability routing (planned)
+
+Some work needs more than code tools. The first such capability is **computer use**: operating a
+desktop, a browser or another application through its interface. It can be served by a separately
+configured agent or by the executor's own agent
+([requirements, section 7.9](../requirements/requirements.md#79-capability-routing),
+[ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md)). The design borrows from LCU
+([study](../research/computer-use.md)). This section sketches the formats; details are settled in
+milestone M5.
+
+### 14.1 Configuration
+
+```yaml
+profiles:
+  operator:
+    description: Agent used for desktop and browser operation
+    adapter: acp
+    command: [some-agent, acp]
+    provides:
+      computer_use: { via: lcu }    # via: native | lcu | other runtime name
+
+  codex-high:
+    adapter: codex-cli              # provides no computer use of its own
+
+capabilities:
+  computer_use:
+    route: dedicated                # dedicated | executor
+    agent: operator                 # used when route is dedicated
+    when_unavailable: error         # error | executor
+    max_concurrent: 1               # one operator per display
+```
+
+| `route` | Meaning |
+|---|---|
+| `executor` | The executor's own agent operates the desktop. Valid only for profiles that declare `provides.computer_use`; otherwise the task is rejected |
+| `dedicated` | Computer-use steps are carried out by the profile named in `agent`, whichever agent is executing the task |
+
+A task may override the route in its own spec. Hufu does not install or configure the runtime
+itself. `via` only tells Hufu how to check readiness, for example by reading `lcu apps`.
+
+### 14.2 Granting
+
+```yaml
+grants:
+  - capability: computer_use
+    apps: ["Figma", "Safari"]       # the app scope
+```
+
+- Without the grant, no route is set up and the executor is not offered the tool, whatever its
+  permission tier.
+- The app scope is required. Terminal applications and the application hosting the agent are
+  always refused. Browsers and password managers must be named explicitly; no wildcard covers them.
+- In a mission, the advisor may request a grant only if the mission's `allowed_grants` includes it,
+  and only for apps the mission lists.
+
+### 14.3 Pre-flight
+
+Before launch, Hufu checks what it can without touching the screen:
+
+1. The serving profile declares the capability and its runtime is present (`hufu doctor` reports
+   this per profile).
+2. Every app in the scope is already allowed in the runtime, where the runtime can list that. If
+   one is missing, the task is rejected with the command the user must run. Hufu never runs that
+   command, and never answers a runtime's approval prompt.
+3. The display slot is free, or the job queues for it.
+
+### 14.4 How a dedicated route works
+
+1. For a task with the grant, Hufu attaches a small MCP server to the executor's session. Over ACP
+   this uses the `mcpServers` parameter of `session/new`; CLI adapters use the agent's own MCP
+   configuration where it has one. An executor that can take neither cannot use a dedicated route,
+   and the task is rejected at validation.
+2. The server offers one tool, `computer_use`, taking an instruction and optional limits.
+3. A call creates a **child job** on the dedicated profile, linked to the parent, carrying the
+   parent's grant and app scope, and waits for it within the parent's remaining time.
+4. The child's final message is returned as the tool result. Screenshots and the action log stay in
+   the child job's directory and are referenced, not inlined.
+5. Child jobs count against the parent's budgets and against the display slot.
+
+### 14.5 Stop and safety
+
+- Cancelling a computer-use job first asks the runtime to stop, so that held keys and buttons are
+  released, and only then terminates the process group.
+- Computer use is scoped to one job. It does not carry over to a follow-up job without a new grant.
+- Computer use acts outside the workspace. Worktree isolation and permission tiers do not contain
+  it, and a grant should be read as wider than `full-access`.
+- The recommended setup is a separate machine, VM or user account for the operating agent.

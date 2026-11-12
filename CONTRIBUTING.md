@@ -33,7 +33,8 @@ The repository root holds only the READMEs, the licence and repository metadata.
 
 ## Writing code (from M1)
 
-- Follow the dependency rules in [`src/README.md`](src/README.md).
+- Hufu is written in Rust. Follow the crate dependency rules in [`src/README.md`](src/README.md),
+  and keep `cargo fmt` and `cargo clippy` clean.
 - A new adapter must pass the conformance suite described in the
   [adapter contract](doc/technical/adapter-contract.md#6-conformance-suite).
 - Tests in the default suite must not need a real agent, a login or the network.
