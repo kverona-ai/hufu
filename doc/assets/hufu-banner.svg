@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-labelledby="t d">
+  <title id="t">Hufu</title>
+  <desc id="d">Two matching halves of a tiger tally, labelled advisor and executor, beside the name Hufu and the line: any agent holds the tally, any agent does the work.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14110d"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7cf6b"/>
+      <stop offset="1" stop-color="#d9931f"/>
+    </linearGradient>
+    <linearGradient id="bronze" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c9803a"/>
+      <stop offset="1" stop-color="#8c4d1e"/>
+    </linearGradient>
+    <path id="left" d="M150,105 H260 V150 H285 V205 H260 V255 H150 A40,40 0 0 1 110,215 V145 A40,40 0 0 1 150,105 Z"/>
+    <path id="right" d="M260,105 H370 A40,40 0 0 1 410,145 V215 A40,40 0 0 1 370,255 H260 V205 H285 V150 H260 Z"/>
+    <clipPath id="clipL"><use href="#left"/></clipPath>
+    <clipPath id="clipR"><use href="#right"/></clipPath>
+  </defs>
+
+  <rect width="1280" height="360" rx="18" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="1279" height="359" rx="18" fill="none" stroke="#3a3126"/>
+
+  <!-- the tally: two halves that fit together -->
+  <g transform="translate(-9,0)">
+    <use href="#left" fill="url(#gold)"/>
+    <g clip-path="url(#clipL)" stroke="#14110d" stroke-width="13" stroke-linecap="round" opacity="0.85">
+      <path d="M128,118 L176,170"/>
+      <path d="M116,176 L170,236"/>
+      <path d="M196,100 L236,146"/>
+      <path d="M200,196 L244,246"/>
+    </g>
+  </g>
+  <g transform="translate(9,0)">
+    <use href="#right" fill="url(#bronze)"/>
+    <g clip-path="url(#clipR)" stroke="#14110d" stroke-width="13" stroke-linecap="round" opacity="0.85">
+      <path d="M392,118 L344,170"/>
+      <path d="M404,176 L350,236"/>
+      <path d="M330,100 L300,138"/>
+      <path d="M326,206 L290,248"/>
+    </g>
+  </g>
+
+  <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" letter-spacing="3" text-anchor="middle">
+    <text x="176" y="288" fill="#d9a441">ADVISOR</text>
+    <text x="344" y="288" fill="#b9793f">EXECUTOR</text>
+  </g>
+
+  <!-- wordmark -->
+  <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="500" y="176" font-size="104" font-weight="800" letter-spacing="-2" fill="#f5efe4">Hufu</text>
+    <text x="504" y="226" font-size="27" font-weight="500" fill="#d8cfbf">Any agent holds the tally. Any agent does the work.</text>
+    <text x="504" y="262" font-size="18" fill="#8f8779">A multi-agent dispatch layer with a pluggable commander</text>
+  </g>
+
+  <!-- seal -->
+  <g transform="translate(1128,62)">
+    <rect width="86" height="86" rx="12" fill="#b3261e"/>
+    <rect x="5" y="5" width="76" height="76" rx="8" fill="none" stroke="#f5efe4" stroke-opacity="0.55" stroke-width="1.5"/>
+    <g font-family="'Songti SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'SimSun', serif" font-size="33" font-weight="700" fill="#f5efe4" text-anchor="middle">
+      <text x="43" y="38">虎</text>
+      <text x="43" y="73">符</text>
+    </g>
+  </g>
+</svg>
