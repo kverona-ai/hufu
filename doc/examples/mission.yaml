@@ -1,6 +1,6 @@
-# Sample mission definition (planned for M3).
+# Sample mission definition.
 # Start with:  hufu mission start -f mission.yaml
-# Format reference: doc/technical/technical-design.md, section 9.
+# Reference: doc/guide/user-guide.md, "Missions".
 
 version: 1
 
@@ -8,10 +8,10 @@ goal: |
   Migrate the HTTP client in this repository from callbacks to async/await.
   Keep behaviour identical and keep the test suite green.
 
-advisor: or-reasoner             # any profile can advise
+advisor: claude                  # any profile can advise; default: roles.advisor
 
 executors:                       # the roster the advisor may dispatch to
-  - codex-high
+  - codex-any                    # a pool: either Codex account
   - kimi
   - agy-fast
 
@@ -26,3 +26,10 @@ budgets:
   max_tokens: 4000000            # applied only where agents report usage
 
 max_tier: workspace-write        # the advisor cannot request more than this for any task
+max_parallel: 2                  # tasks that do not depend on each other may run side by side
+
+acceptance_commands:             # command prefixes the advisor may use in acceptance checks
+  - npm test
+
+acceptance:                      # checked once more against the finished mission
+  - command: npm test

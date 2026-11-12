@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed.** Waiting for the project owner's confirmation |
+| **Status** | Accepted. Proposed during design; built as proposed when the project owner asked for the whole plan to be implemented (2026-11-12) |
 | **Date** | 2026-11-12 |
 
 ## Context

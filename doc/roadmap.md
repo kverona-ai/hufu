@@ -2,134 +2,151 @@
 
 | | |
 |---|---|
-| **Status** | Plan |
-| **Last updated** | 2026-11-12 (Rust, both first adapters, M5 added) |
-| **Related** | [Requirements](requirements/requirements.md), [Architecture](architecture/architecture.md) |
+| **Status** | M0 to M5 are implemented in Hufu 0.1. What remains is verification against real agents and the first release |
+| **Last updated** | 2026-11-12 (all milestones implemented in one step, on Linux, macOS and Windows) |
+| **Related** | [Requirements](requirements/requirements.md), [Architecture](architecture/architecture.md), [User guide](guide/user-guide.md) |
 
-Milestones are ordered so that each one is useful on its own and none requires rewriting the one
-before. Requirement ids (FR-xx) refer to the [requirements](requirements/requirements.md).
+The milestones were planned so that each would be useful on its own. The project owner then asked
+for the whole plan to be implemented at once, for all three platforms, so this document now
+records what each milestone delivered and, more importantly, **how far each exit criterion has
+actually been demonstrated**. Requirement ids (FR-xx) refer to the
+[requirements](requirements/requirements.md).
 
 ```mermaid
 flowchart LR
-    M0["M0<br/>Foundation<br/>docs and layout"] --> M1["M1<br/>First dispatch<br/>core, CLI, 2 adapters"]
-    M1 --> M2["M2<br/>Many agents<br/>ACP, pi, worktrees"]
-    M2 --> M3["M3<br/>Pluggable commander<br/>missions, tally checks"]
-    M3 --> M4["M4<br/>Always on<br/>daemon, quotas, MCP"]
-    M4 --> M5["M5<br/>Beyond the workspace<br/>computer-use routing"]
+    M0["M0<br/>Foundation"] --> M1["M1<br/>First dispatch"]
+    M1 --> M2["M2<br/>Many agents"]
+    M2 --> M3["M3<br/>Pluggable commander"]
+    M3 --> M4["M4<br/>Always on"]
+    M4 --> M5["M5<br/>Beyond the workspace"]
+    M5 --> N["Next<br/>real agents,<br/>first release"]
 ```
+
+## How "implemented" was checked
+
+| Check | Result |
+|---|---|
+| End-to-end tests that drive the built `hufu` binary against built-in fake agents, one per adapter | Pass on Linux, macOS and Windows in CI |
+| Adapter conformance suite, C1 to C12, for all eight adapters | Pass |
+| Unit tests for parsers, mappings, configuration, schema validation, routing | Pass |
+| `hufu doctor --self-test` on the built binary | Pass on the three platforms in CI |
+| Formatting, lints (also for the Windows and macOS targets), minimum Rust version | Clean |
+| Runs against real, logged-in agents | **Not done.** The development environment has no agent accounts |
+
+The fake agents print what each agent's documentation says the real one prints. They prove that
+Hufu's own machinery works; they cannot prove that a vendor's CLI still behaves as documented. That
+is the open item under "Next".
 
 ## M0. Foundation
 
-**State: in progress (this is the current milestone).**
-
-| Deliverable | Status |
-|---|---|
-| Requirements, research, architecture, technical design, deployment plan | Done in draft |
-| Architecture decision records | Done in draft |
-| Repository layout: `doc/` for documents, `src/` for code | Done |
-| README in English and Chinese | Done |
-| Implementation language | Decided: Rust ([ADR-0007](adr/0007-implement-in-rust.md)) |
-| First adapters | Decided: Codex and Antigravity both ship in the first version |
-| File-based job store ([ADR-0006](adr/0006-file-based-job-store.md)) | Proposed; waiting for the project owner |
-
-**Exit:** the documents are reviewed and the remaining proposal is confirmed or replaced.
+**State: done.** Requirements, research, architecture, technical design, decision records, the
+repository layout and both READMEs. The file-based job store
+([ADR-0006](adr/0006-file-based-job-store.md)) is what was built.
 
 ## M1. First dispatch
 
-**Goal:** from Claude Code, hand a task to another agent, keep working, and collect the result
-later, even from a different session.
+**State: implemented.**
 
-| Deliverable | Requirements |
+| Delivered | Requirements |
 |---|---|
-| Cargo workspace under `src/`, CI, release pipeline for prebuilt binaries, the `hufu` environment for cloud sessions | NFR-14 |
-| Task spec and configuration schemas with validation | FR-01, FR-21, FR-47 |
-| Job store, detached runner, heartbeat, timeouts, cancel, lost-job detection | FR-08, FR-11 to FR-13 |
+| Cargo workspace under `src/`, CI on three platforms, release workflow for six targets, install scripts | NFR-14 |
+| Task spec and configuration with validation; every problem reported at once | FR-01, FR-21, FR-47 |
+| Job store, detached runner, heartbeat, timeouts, cancel of the whole process tree, lost-job detection | FR-08, FR-11 to FR-13 |
 | CLI: `run`, `status`, `wait`, `result`, `logs`, `cancel`, `resume`, `agents`, `doctor` | FR-02 to FR-07, FR-22, FR-43, FR-44 |
 | Adapter contract and conformance suite with fake agents | FR-20 |
-| Codex CLI adapter | FR-15 |
-| Antigravity CLI adapter | FR-15 |
-| Permission tiers and effort mapping for both adapters | FR-24 to FR-29 |
-| Claude Code skill and `CLAUDE.md` snippet | FR-34 |
+| Codex CLI and Antigravity CLI adapters, with tier and effort mapping | FR-15, FR-24 to FR-29 |
+| Claude Code skill and `CLAUDE.md` snippet, installed by `hufu setup` | FR-34 |
 
-**Exit:** the durability test passes (a job outlives its caller and its result is read from a new
-session), both adapters pass the conformance suite, and a live smoke test succeeds on a real
+**Exit criteria.** The durability test passes (a job outlives its caller and its result is read by
+another process). Both adapters pass the conformance suite. *Open:* the live smoke test on a real
 install of each agent.
-
-**Both adapters are required for M1**; this was decided by the project owner. Codex is built first
-because its interface is the better documented, and it shakes out the adapter contract; `agy`
-follows inside the same milestone.
-
-**Risks:** the `agy` non-TTY output bug, handled by closing stdin, treating empty output as a
-failure and, if needed, running `agy` under a pseudo-terminal; and the open question about
-subscription terms, which is documented for users and does not block building the adapter.
 
 ## M2. Many agents
 
-**Goal:** one task spec reaches at least six agents, including a model on an open API.
+**State: implemented.**
 
-| Deliverable | Requirements |
+| Delivered | Requirements |
 |---|---|
-| Generic ACP adapter | FR-16 |
-| Verified ACP profiles: Cursor, Kimi Code, pi (through `pi-acp`) | FR-17 |
-| pi adapter with provider and model profiles for OpenRouter, DeepSeek, Z.ai and Kimi | FR-18 |
+| Generic ACP adapter with a client written for Hufu; permission requests answered by tier | FR-16 |
+| Preset profiles for Cursor and Kimi Code over ACP; headless adapters for Cursor and Kimi Code | FR-17 |
+| pi adapter with provider and model profiles | FR-18 |
 | Claude Code adapter | FR-19 |
-| Git worktree isolation and same-directory write protection | FR-31, FR-33 |
+| Third-party adapters as external programs speaking a small JSON protocol | FR-23 |
+| Git worktree isolation; read-only enforcement by comparing the workspace before and after | FR-31, FR-33 |
 | Structured output with schema validation | FR-09 |
 | Job retention and pruning | FR-14 |
 
-**Exit:** adding an unlisted ACP agent works from configuration alone, demonstrated with one agent
-not named in this plan.
+**Exit criteria.** An ACP agent that Hufu has no code for runs from configuration alone; this is
+shown with the fake ACP agent. *Open:* the same with a real agent not named in this plan.
 
 ## M3. Pluggable commander
 
-**Goal:** any profile can be the advisor. A mission runs from goal to report without a person in
-the loop.
+**State: implemented.**
 
-| Deliverable | Requirements |
+| Delivered | Requirements |
 |---|---|
-| Mission engine: roster, plan request, plan validation, dependency-ordered dispatch | FR-35 to FR-37, FR-41 |
-| Tally checks: command, paths, schema, advisor review | FR-38 |
+| Mission engine: roster, plan request, plan validation, dependency-ordered and parallel dispatch | FR-35 to FR-37, FR-41 |
+| Tally checks: command, paths, schema, denied actions, advisor review | FR-38 |
 | Review loop with accept, revise and abort; follow-ups on resumed sessions | FR-39 |
-| Budgets: rounds, wall clock, tokens or cost | FR-40 |
-| Mission inspection, pause and resume; mission report | FR-42 |
-| Usage accounting per job and per mission | FR-49 |
+| Budgets: tasks, rounds, wall clock, tokens or cost | FR-40 |
+| Mission inspection, pause, resume, abort; mission report | FR-42 |
+| Usage accounting per job and per mission, where agents report usage | FR-49 |
 
-**Exit:** the same goal completes with two different advisor profiles, one of them a model reached
-through pi, with no code change between the runs.
+**Exit criteria.** Any profile can be the advisor; the tests run missions with different advisors
+and executors without code changes. *Open:* the same goal completed by two real advisors, one of
+them a model reached through pi.
 
 ## M4. Always on
 
-**Goal:** Hufu becomes a service other tools can rely on.
+**State: implemented.**
 
-| Deliverable | Requirements |
+| Delivered | Requirements |
 |---|---|
-| Daemon with enforced concurrency limits, launchd and systemd units | FR-32, FR-46 |
-| MCP shell | FR-45 |
+| Concurrency limits, global and per profile, enforced with and without the daemon | FR-32 |
+| Optional daemon: ordered queue, restart of lost jobs, pruning | FR-46 |
+| MCP server with 22 tools, including configuration tools | FR-45, FR-58, FR-59 |
 | Retry policies | FR-10 |
-| Plug-in adapters loaded from outside the package | FR-23 |
-| Decision on Windows support | |
+| Several accounts per agent, pools with failover, round-robin and least-busy | FR-60 to FR-62 |
+| One-command setup: `hufu up`, `hufu init`, `hufu setup` for five hosts; install scripts | FR-63, FR-64, FR-66 |
+| Windows support | NFR-07 |
 
-**Exit:** an MCP host other than Claude Code submits a job and reads its result.
+**Exit criteria.** An MCP client submits a job and reads its result; the tests do this with a
+client of their own over stdio. *Open:* the same from a real host other than Claude Code.
+
+Changed from the plan: the daemon is optional rather than required for limits and for MCP, and
+Hufu does not install launchd or systemd units (the [deployment guide](deployment/deployment.md#6-run-modes)
+shows how to run `hufu daemon run` under one).
 
 ## M5. Beyond the workspace
 
-**Goal:** a task can use computer use, served either by a dedicated operator profile or by the
-executor's own agent, chosen in configuration.
+**State: implemented.**
 
-| Deliverable | Requirements |
+| Delivered | Requirements |
 |---|---|
-| Survey of agents and runtimes that provide computer use, starting from the [LCU study](research/computer-use.md) | |
 | Capability declaration on profiles; readiness in `hufu doctor` | FR-51, FR-57 |
-| Routing: `executor` and `dedicated`, global and per task | FR-52 |
-| Dedicated route: the `computer_use` tool, child jobs, parent links, budgets | FR-53 |
-| Grants with an application scope; pre-flight; fail closed | FR-54, FR-55 |
+| Routing: `executor` and `dedicated`, in configuration and per task; any executor profile that supports computer use, or a profile kept for it | FR-52, FR-65 |
+| Dedicated route: the `computer_use` hand-over tool, child jobs linked to their parent | FR-53 |
+| Grants with an application scope; pre-flight against the runtime's allow-list; fail closed | FR-54, FR-55 |
 | Display slot in the scheduler | FR-56 |
 
-**Exit:** the same coding task completes a desktop step twice, once through the executor's own
-agent and once through a dedicated operator, with only configuration changed between the runs.
+**Exit criteria.** The same task completes a desktop step through the executor's own agent and
+through a dedicated operator, with only configuration changed; the tests show this with a fake
+operator. *Open:* the same on a real desktop. LCU, the reference runtime, needs macOS on Apple
+silicon, which no test machine of this project has.
 
-**Depends on:** a machine the computer-use runtime supports. LCU, the reference runtime, does not
-support Intel Macs.
+## Next
+
+In order:
+
+1. **Live verification.** Run each adapter against the real agent on a machine that has the
+   logins: one read-only job, one writing job, one cancel, one resume. Record the agent version in
+   the [agent landscape](research/agent-landscape.md) and fix what differs from the documentation.
+2. **First release.** Tag `v0.1.0`; the release workflow builds and publishes the binaries, and the
+   install scripts start serving them.
+3. **Distribution channels.** crates.io, a Homebrew tap, an npm installer. Each needs an account or
+   a name reserved by the maintainers.
+4. **Computer use on a real desktop.** With LCU on Apple silicon, and with one agent's native
+   computer use.
 
 ## Later
 
@@ -140,3 +157,6 @@ Ideas that are deliberately not scheduled:
 - Sharing a roster and budgets across a team.
 - Remote executors: dispatching to agents on another machine once ACP has a stable remote
   transport.
+- Service units installed by Hufu itself.
+- A Windows job object around each agent, so that a process tree can be ended even after parents
+  have exited.

@@ -2,20 +2,21 @@
 
 | | |
 |---|---|
-| **Status** | Plan. Hufu has no release yet, so the commands below describe the intended experience |
-| **Last updated** | 2026-11-12 (install channels for a Rust binary) |
-| **Related** | [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
+| **Status** | Describes Hufu 0.1 as implemented. No release has been tagged yet, so the install scripts build from source until the first tag |
+| **Last updated** | 2026-11-12 (install scripts, `hufu up`, three platforms, release workflow) |
+| **Related** | [User guide](../guide/user-guide.md), [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
 
 Hufu is deployed on a developer's own machine, next to the agents it drives. There is no server to
-host. "Deployment" means: install the CLI, point it at the agents already installed, connect a
-host agent, and, from M4, optionally run a daemon.
+host. "Deployment" means: install the one binary, point it at the agents already installed, connect
+the agents that should be able to dispatch, and optionally run a daemon. `hufu up` does all of that
+in one command.
 
 ## 1. Where Hufu runs
 
 ```mermaid
 flowchart LR
-    subgraph Machine["Developer machine (macOS or Linux)"]
-        HOST["Host agent<br/>e.g. Claude Code"]
+    subgraph Machine["Developer machine (Linux, macOS or Windows)"]
+        HOST["Host agents over MCP<br/>Claude Code, Codex, Cursor, ..."]
         HUFU["hufu"]
         HOME[("~/.hufu<br/>config, jobs, missions")]
         subgraph Installed["Installed and logged-in agents"]
@@ -24,6 +25,7 @@ flowchart LR
             A3["agent (Cursor)"]
             A4["kimi"]
             A5["pi"]
+            A6["claude"]
         end
         HOST --> HUFU
         HUFU <--> HOME
@@ -45,9 +47,9 @@ flowchart LR
 | Requirement | Version | Notes |
 |---|---|---|
 | Hufu | One self-contained binary | No language runtime is needed for Hufu itself |
-| Git | Any recent | Required for worktree isolation and change detection |
+| Git | Any recent | Needed for worktree isolation. Without it, change detection falls back to comparing file sizes and times |
 | At least one agent CLI | See below | Installed and logged in by the user |
-| Operating system | macOS or Linux, x86-64 or ARM64 | Windows is not a target before M4 |
+| Operating system | Linux, macOS or Windows; x86-64 or ARM64 | Linux binaries are static and run on any distribution |
 
 Agents are installed and authenticated the way their vendors document. Hufu does not install them
 and does not log in for the user. Some agents need Node.js; that is the agent's requirement, not
@@ -59,146 +61,203 @@ Hufu's.
 | Antigravity | Vendor installer | Run `agy` interactively once |
 | Cursor | `curl https://cursor.com/install -fsS \| bash` | `agent login`, or set `CURSOR_API_KEY` |
 | Kimi Code | Vendor installer | `kimi login` |
+| Claude Code | Vendor installer | Run `claude` interactively once |
 | pi | `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` (needs Node.js ≥ 22.19) | Provider API key in the environment |
 
 ## 3. Install
 
-Planned channels for the first release (M1). The crate is `hufu-cli`; the command is `hufu`.
+The package is `hufu-cli`; the command is `hufu`.
 
 | Channel | Command | Notes |
 |---|---|---|
-| Install script | `curl -fsSL <release-url>/install.sh \| sh` | Downloads the prebuilt binary for the platform and verifies its checksum |
-| Homebrew | `brew install kverona-ai/tap/hufu` | macOS and Linux |
-| Cargo | `cargo install hufu-cli` | Builds from source; needs a Rust toolchain |
-| npm | `npm install -g hufu` | Optional thin installer that fetches the same binary; the npm name is free as of 2026-11-12 |
+| Install script, macOS and Linux | `curl -fsSL https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.sh \| sh` | Installs to `~/.local/bin` |
+| Install script, Windows | `irm https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.ps1 \| iex` | Installs to `%LOCALAPPDATA%\hufu\bin` and adds it to the user `PATH` |
+| Cargo | `cargo install --git https://github.com/kverona-ai/hufu hufu-cli --locked` | Builds from source; needs Rust 1.89 or newer |
+| From a checkout | `cd src && cargo build --release -p hufu-cli`, then copy `target/release/hufu` | |
 
-After installing:
+What the install scripts do, and nothing more:
+
+1. Work out the platform and download `hufu-<target>.tar.gz` (or `.zip`) and its `.sha256` from the
+   latest GitHub release.
+2. Verify the checksum. A mismatch, or a release without a checksum, stops the install.
+3. Copy one file, `hufu`, into the install directory.
+4. If no prebuilt binary can be downloaded (no release yet, or an unsupported platform), build with
+   `cargo install` instead, if Rust is present.
+
+| Option | Environment variable | Meaning |
+|---|---|---|
+| `--up` / `-Up` | `HUFU_UP=1` | Run `hufu up` afterwards |
+| `--version <tag>` / `-Version` | `HUFU_VERSION` | A specific release instead of the latest |
+| `--dir <path>` / `-Dir` | `HUFU_INSTALL_DIR` | Where to put the binary |
+| `--from-source` / `-FromSource` | `HUFU_FROM_SOURCE=1` | Always build with cargo |
+| | `HUFU_DOWNLOAD_BASE` | A mirror that holds the release files, for networks that cannot reach GitHub |
+
+Options are passed to a piped script like this: `curl ... | sh -s -- --up --dir /opt/bin`.
+
+Prebuilt targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`,
+`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`.
+
+Not offered yet: Homebrew, crates.io and npm. They need accounts and names that the maintainers
+have to set up; see section 10.
+
+## 4. Set up
 
 ```bash
-hufu doctor                # finds installed agents, prints versions and login state
+hufu up
 ```
 
-From source, once code exists:
+| Step | Equivalent command | Result |
+|---|---|---|
+| Configuration | `hufu init` | `~/.hufu/config.yaml` with one profile per agent found, a default advisor and default executors. An existing file is kept |
+| Host registration | `hufu setup` | Hufu's MCP server registered with every agent found. `hufu up --no-setup` skips it |
+| Daemon | `hufu daemon start` | The optional daemon runs. `hufu up --no-daemon` skips it |
+| Check | `hufu doctor` | A table of agents with installation and login state, and the next steps |
 
-```bash
-git clone https://github.com/kverona-ai/hufu.git
-cd hufu/src
-cargo build --release
-install -m 755 target/release/hufu ~/.local/bin/hufu
-```
+Then adjust to taste, by command, by hand or through any connected agent:
 
-## 4. Configure
+- models, effort and accounts: `hufu profile add|set`; see the
+  [user guide](../guide/user-guide.md#4-agents-accounts-and-pools)
+- several accounts of one agent: one profile each, with `--home` or `--env-from`, and a pool over them
+- who advises and who executes: `hufu config set roles.advisor ...`, `roles.executors`
+- who operates the desktop: `capabilities.computer_use`
+- project-specific settings: add `--project` to write `<project>/.hufu/config.yaml`
 
-1. `hufu doctor` lists the agents it found and writes a starter `~/.hufu/config.yaml` on request,
-   with one profile per agent at the `read-only` default.
-2. Edit profiles: choose models and effort, and raise the default tier only where intended. A
-   commented sample is in [`doc/examples/config.yaml`](../examples/config.yaml).
-3. For agents that use API keys, export the key in the shell profile and list the variable's
-   **name** in the profile's `env`. Hufu passes it through and never stores it.
-4. Optionally add `<project>/.hufu/config.yaml` for project-specific profiles or limits.
+For agents that use API keys, export the key in the shell profile and list the variable's **name**
+in the profile's `env`. Hufu passes it through and never stores it.
 
 | Variable | Purpose |
 |---|---|
 | `HUFU_HOME` | Location of configuration and job data. Default `~/.hufu` |
-| `HUFU_CONFIG` | Path to an alternative global configuration file |
-| `HUFU_LOG_LEVEL` | `error`, `warn`, `info`, `debug` |
-| `HUFU_LIVE` | Enables live smoke tests against real agents during development |
+| `HUFU_EXE` | The `hufu` program that `hufu setup` writes into other agents' settings, when it should not be the running one |
+| `HUFU_KILL_GRACE_MS` | How long a cancelled agent gets to stop by itself. Default 10000 |
+| `HUFU_STALE_AFTER_MS` | After how long without a heartbeat a job with a dead runner counts as lost. Default 30000 |
 
-## 5. Connect a host agent
+A complete, commented sample is [`doc/examples/config.yaml`](../examples/config.yaml).
 
-### Claude Code (M1)
+## 5. Connect host agents
 
-Two options ship with each release, from `src/integrations/claude-code/`:
+`hufu setup` registers the MCP server `hufu` (command `hufu mcp`, over stdio) with the agents found
+on the machine, or with the ones named by `--agent`.
 
-- **Skill.** Installs a skill that teaches Claude when to delegate and how to use `hufu run`,
-  `hufu wait` and `hufu result`.
-- **Snippet.** A short section for `CLAUDE.md` with the same rules, for teams that prefer plain
-  project instructions.
+| Host | Where the registration goes | Project scope (`--project`) |
+|---|---|---|
+| Claude Code | `claude mcp add --scope user hufu`, plus the skill under `~/.claude/skills/hufu/` | `.mcp.json` and `.claude/skills/hufu/` in the project |
+| Codex | A marked block in `~/.codex/config.toml` | |
+| Cursor | `~/.cursor/mcp.json` | |
+| Kimi Code | `~/.kimi-code/mcp.json` | |
+| Antigravity | `~/.gemini/config/mcp_config.json` | |
+| Anything else | `hufu setup --agent generic --print` prints the entry to add by hand | |
 
-Both tell the host to submit in the background, keep working, and fetch compact results, so the
-host's context stays small.
+`--print` shows what would be written, `--remove` takes it out again. Files are edited in place:
+other servers stay, and the original is copied once to `<file>.hufu-bak`. Each agent's own
+configuration variable (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CURSOR_CONFIG_DIR`, `KIMI_CODE_HOME`)
+is honoured.
 
-### Any MCP host (M4)
-
-```bash
-claude mcp add hufu -- hufu mcp
-```
-
-or the equivalent entry in another host's MCP configuration. The MCP shell needs the daemon.
+The Claude Code skill and a snippet for `CLAUDE.md` are in `src/integrations/claude-code/`. Both
+tell the host to submit in the background, keep working, and fetch compact results, so the host's
+context stays small.
 
 ### Scripts and CI
 
 ```bash
-hufu run --agent codex-high --permission workspace-write --timeout 30m --wait --json \
-  -f task.yaml > result.json
-echo "exit: $?"            # 0 accepted, 3 failed, 5 timed out, 8 rejected by tally check
+hufu --json run -a codex -p workspace-write --timeout 30m --wait -f task.yaml > result.json
+echo "exit: $?"            # 0 accepted, 3 failed, 5 timed out, 8 rejected by a check, 10 not logged in
 ```
 
 ## 6. Run modes
 
-| Mode | From | How | Use when |
-|---|---|---|---|
-| **On demand** | M1 | Nothing to start. Each `hufu run` spawns its own detached runner | Normal interactive use |
-| **Daemon** | M4 | `hufu daemon start`, or a service unit | Queues, enforced quotas, the MCP shell, jobs that should start after a reboot |
+| Mode | How | Use when |
+|---|---|---|
+| **On demand** | Nothing to start. Each `hufu run` starts its own detached runner. Limits on concurrent jobs hold | Normal use |
+| **Daemon** | `hufu daemon start`, or `hufu daemon run` under a service manager | Strict start order for queued jobs, automatic restart of lost jobs that may be retried, hourly pruning |
 
-Service units planned for M4:
+The daemon keeps no state of its own; it can be stopped and started at any time, and stopping it
+does not touch running jobs. It is not needed for the MCP server.
 
-- **macOS:** a launchd agent at `~/Library/LaunchAgents/llc.kverona.hufu.plist`, running as the
-  user, so that agents find their logins in the user's home.
-- **Linux:** a systemd user unit, `systemctl --user enable --now hufu`.
+To start it at login, run `hufu daemon run` from a service manager, always as the logged-in user
+and never as root, because the agents' credentials belong to that user:
 
-The daemon always runs as the logged-in user, never as root, because the agents' credentials belong
-to that user.
+- **macOS:** a launchd agent in `~/Library/LaunchAgents/` with `ProgramArguments` `hufu daemon run`.
+- **Linux:** a systemd user unit with `ExecStart=%h/.local/bin/hufu daemon run`, enabled with
+  `systemctl --user enable --now hufu`.
+- **Windows:** a scheduled task that runs `hufu daemon run` at logon.
+
+Hufu does not install these units itself.
 
 ## 7. Security hardening
 
 | Recommendation | Reason |
 |---|---|
-| Keep the global default tier at `read-only` | A forgotten flag then costs nothing |
+| Keep the global default tier at `read-only` | A forgotten flag then costs nothing. `full-access` cannot be made the global default at all |
 | Use `isolation: worktree` for every write-capable job | Changes land on a branch for review, never in the working tree |
-| Run `full-access` profiles (pi, Kimi print mode) inside a container or VM | These agents have no permission system; Hufu cannot add one |
-| List only the environment variables a profile needs | Limits what a misbehaving agent can read |
-| Do not commit `~/.hufu`; do commit `<project>/.hufu/config.yaml` | Job records can contain code and prompts; project configuration holds no secrets |
+| Run `full-access` profiles (pi, Kimi print mode) inside a container or VM | These agents have no sandbox of their own; Hufu cannot add one |
+| Mark an ACP profile `verified` only after watching it ask before acting | Until then Hufu treats it as `full-access` only, which is the honest description |
+| List only the environment variables a profile needs | Agents get a small fixed environment plus those names; nothing else from your shell |
+| Grant computer use per task and per application | A grant names the applications. The desktop runtime's own allow-list is never widened by Hufu |
+| Do not commit `~/.hufu`; do commit `<project>/.hufu/config.yaml` | Job records contain prompts and agent output, unencrypted; project configuration holds no secrets |
 | Review vendor terms before unattended use of subscription plans | See the [agent landscape](../research/agent-landscape.md#34-antigravity-cli-agy) |
 
 ## 8. Operations
 
 | Task | Command |
 |---|---|
-| Check agents and versions | `hufu doctor` |
-| See what is running | `hufu status --all` |
+| Check agents, logins and configuration | `hufu doctor`; `hufu agents --probe` |
+| Prove the machine can run jobs at all | `hufu doctor --self-test` (no account, no network) |
+| See what is running | `hufu status`; `hufu status --all` |
 | Follow a job | `hufu logs <job> --follow` |
-| Stop a job | `hufu cancel <job>` |
-| Clean up old jobs | `hufu prune --older-than 30d` |
-| Remove finished worktrees | `hufu prune --worktrees` |
+| Stop a job | `hufu cancel <job>`; `--force` to skip the grace period |
+| Clean up old jobs | `hufu prune --older-than 30d`; add `--worktrees` for leftover worktrees |
 | Back up | Copy `~/.hufu/config.yaml`. Job data is disposable |
-| Upgrade | Re-run the install channel used (`brew upgrade hufu`, `cargo install hufu-cli`, or the install script), then `hufu doctor` |
-| Uninstall | Remove the `hufu` binary, then delete `~/.hufu` |
+| Upgrade | Run the install script again, then `hufu doctor`. Running jobs keep the binary they started with |
+| Uninstall | `hufu setup --remove`, `hufu daemon stop`, delete the `hufu` binary, then delete `~/.hufu` |
 
 **Disk use.** A job directory holds the raw agent output, which can reach tens of megabytes for
-long runs. Prune on a schedule.
+long runs. `retention` in the configuration bounds it (30 days and 2000 jobs by default); the
+daemon prunes hourly, and `hufu prune` does it on demand.
 
 ## 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `failed: auth_required` | The agent has no saved login | Run the agent's own login command once, interactively |
-| `failed: empty_output` on `agy` | The non-TTY stdout bug in some `agy` versions | Upgrade `agy`; enable the PTY fallback in the profile if the adapter offers it |
-| `failed: permission_denied` | The agent skipped actions the tier does not allow | Raise the tier explicitly, or add allow rules in the agent's own settings |
-| Submission rejected: tier not supported | The agent cannot honour that tier headlessly | Use a supported tier with worktree isolation, or the agent's ACP profile |
-| Job shows `lost` | The runner was killed, or the machine slept or restarted | Resubmit. From M4 the daemon can retry |
-| `codex` refuses to run outside a repository | Codex requires a Git repository by default | Run inside a repository, or let the adapter pass the skip flag |
+| Exit 10, `agent_unavailable` | The agent's program is not on `PATH` | Install it, or set the profile's `command` |
+| Exit 10, `auth_required` | No saved login, or the variable named in the message is not exported | Log the agent in once, interactively; export the variable |
+| `failed: empty_output` | The agent exited without an answer | `hufu logs <job> --raw --stderr` shows what it printed |
+| `failed: tier_violated` | A read-only job changed files | Use `workspace-write` if writing was intended |
+| Submission refused: tier not supported | The agent cannot enforce that tier headlessly | Use a supported tier with worktree isolation, or the agent's ACP profile |
+| Job shows `lost` | The runner was killed, or the machine slept or restarted | `hufu resume`, or run again. With the daemon and `--retry` this is automatic |
+| `hufu setup` did nothing for an agent | It was not found on `PATH` | `hufu setup --agent <name>`, or `--all` |
+
+More in the [user guide](../guide/user-guide.md#15-troubleshooting).
 
 ## 10. Release and distribution (for maintainers)
 
-Planned from M1:
+Two workflows live in `.github/workflows/`.
 
-- Versions are tagged in Git. CI builds release binaries for macOS and Linux on x86-64 and ARM64,
-  attaches them to a GitHub Release with checksums, and publishes the `hufu-cli` crate. A release
-  tool such as `cargo-dist` is the candidate for this pipeline.
-- CI on every pull request: `cargo fmt --check`, `cargo clippy`, unit tests, fake-agent tests, the
-  conformance suite and a Markdown link check for `doc/`.
-- Live smoke tests run on a maintainer's machine before each release, because they need real
-  logins. Their results are attached to the release notes.
-- Names to reserve before the first public announcement: `hufu-cli` on crates.io, and `hufu` on npm
-  for the optional installer.
+**`ci.yml`**, on every pull request and on `main`:
+
+| Job | What it checks |
+|---|---|
+| Format and lints | `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings`, with a pinned toolchain so that a new compiler release does not fail unrelated changes |
+| Test | `cargo test` and `hufu doctor --self-test` on Linux, macOS and Windows. When a test fails, the homes it left behind are uploaded |
+| Minimum Rust version | The workspace compiles with the version declared in `src/Cargo.toml` |
+| Install scripts | `shellcheck` on `install.sh`, a parse of `install.ps1` |
+
+**`release.yml`**, when a tag `vX.Y.Z` is pushed:
+
+1. Checks that the tag matches the version in `src/Cargo.toml`, and creates a draft release.
+2. Builds `hufu` for the six targets. The Linux binaries are static (musl) and linked with the
+   linker that ships with Rust, so one runner builds both architectures.
+3. Packs each binary with the READMEs and the licence, adds a SHA-256 file, uploads both.
+4. Publishes the release only after every target was built. The install scripts read from
+   `releases/latest`, so a half-built release is never served.
+
+To release: set `version` in `src/Cargo.toml`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+Not automated, and open:
+
+- Live smoke tests against real agents need real logins, so they run on a maintainer's machine
+  before a release.
+- Publishing to crates.io needs the name `hufu-cli` and a token; Homebrew needs a tap repository;
+  an npm installer needs the name `hufu`. None of these is set up.
+- Binaries are not code-signed, so macOS or Windows may warn about one that was downloaded with a
+  browser instead of the install script.

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted. Supersedes the proposal in [ADR-0003](0003-typescript-on-node.md) |
+| **Status** | Accepted. Supersedes the proposal in [ADR-0003](0003-typescript-on-node.md). The libraries named under "Decision" were replaced by [ADR-0009](0009-synchronous-core-and-own-protocol-clients.md); the choice of language stands |
 | **Date** | 2026-11-12 |
 | **Decided by** | Project owner |
 

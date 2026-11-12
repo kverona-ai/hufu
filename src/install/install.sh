@@ -5,7 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.sh | sh -s -- --up
 #
 # Options (also settable through the environment):
-#   --up               run `hufu up` afterwards: configure, register with your agents, start the daemon
+#   --up               run `hufu up` afterwards: configure, register with your agents,
+#                      start the daemon                                     (HUFU_UP=1)
 #   --version <tag>    install this release instead of the latest one       (HUFU_VERSION)
 #   --dir <path>       install the binary here, default ~/.local/bin        (HUFU_INSTALL_DIR)
 #   --from-source      build with cargo instead of downloading a binary     (HUFU_FROM_SOURCE=1)
@@ -21,7 +22,7 @@ REPO="kverona-ai/hufu"
 VERSION="${HUFU_VERSION:-latest}"
 DIR="${HUFU_INSTALL_DIR:-$HOME/.local/bin}"
 FROM_SOURCE="${HUFU_FROM_SOURCE:-0}"
-UP=0
+UP="${HUFU_UP:-0}"
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -33,7 +34,8 @@ usage() {
     cat <<'EOF_USAGE'
 Installs Hufu on macOS and Linux.
 
-  --up               run `hufu up` afterwards: configure, register with your agents, start the daemon
+  --up               run `hufu up` afterwards: configure, register with your agents,
+                     start the daemon                                     (HUFU_UP=1)
   --version <tag>    install this release instead of the latest one       (HUFU_VERSION)
   --dir <path>       install the binary here, default ~/.local/bin        (HUFU_INSTALL_DIR)
   --from-source      build with cargo instead of downloading a binary     (HUFU_FROM_SOURCE=1)

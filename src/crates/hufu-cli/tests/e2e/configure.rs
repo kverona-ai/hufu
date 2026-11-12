@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{Env, HUFU, strings};
+use crate::common::{Env, HUFU, fake, strings};
 
 fn refused(env: &Env, args: &[&str], needle: &str) {
     let r = env.hufu(args);
@@ -444,4 +444,47 @@ fn doctor_reports_the_state_of_the_installation() {
         env.json(&["status", "--all"]).1["jobs"].as_array().unwrap().is_empty(),
         "the self-test must not leave jobs in the user's home"
     );
+}
+
+#[test]
+fn the_documented_examples_are_valid() {
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../doc/examples");
+    let env = Env::new("examples");
+    env.git_init();
+    for name in ["task.yaml", "mission.yaml"] {
+        std::fs::copy(examples.join(name), env.work.join(name)).unwrap();
+    }
+
+    // The sample configuration, exactly as documented.
+    std::fs::copy(examples.join("config.yaml"), env.home.join("config.yaml")).unwrap();
+    let (code, doc) = env.json(&["config", "validate"]);
+    assert_eq!((code, doc["valid"].as_bool()), (0, Some(true)), "{doc}");
+    let (_, agents) = env.json(&["agents"]);
+    assert_eq!(agents["roles"]["advisor"], "claude", "{agents}");
+    assert_eq!(strings(&agents["roles"]["executors"]), vec!["codex-any", "agy-fast", "kimi"]);
+    assert_eq!(agents["computer_use"]["agent"], "desk", "{agents}");
+
+    // The sample task names a pool from that configuration.
+    let (code, plan) = env.json(&["run", "-f", "task.yaml", "--dry-run"]);
+    assert_eq!(code, 0, "{plan}");
+    assert!(["codex-high", "codex-work"].contains(&plan["profile"].as_str().unwrap()), "{plan}");
+    assert_eq!(plan["permission"], "workspace-write");
+
+    // The sample mission, with the same names driven by fake agents so that it can really start.
+    env.config(json!({
+        "profiles": {
+            "codex-high": {"adapter": "codex-cli", "command": fake("codex")},
+            "codex-work": {"adapter": "codex-cli", "command": fake("codex")},
+            "agy-fast": {"adapter": "agy-cli", "command": fake("agy")},
+            "kimi": {"adapter": "acp", "command": fake("acp"), "permission_requests": "verified"},
+        },
+        "pools": {"codex-any": {"members": ["codex-high", "codex-work"]}},
+    }));
+    let (code, started) = env.json(&["mission", "start", "-f", "mission.yaml"]);
+    assert_eq!(code, 0, "{started}");
+    let id = started["id"].as_str().expect("a mission id").to_string();
+    env.hufu(&["mission", "abort", &id]).expect(0);
+    env.hufu(&["mission", "wait", &id, "--timeout", "60s"]);
+    let (_, ended) = env.json(&["mission", "status", &id]);
+    assert_eq!(strings(&ended["executors"]), vec!["codex-any", "kimi", "agy-fast"], "{ended}");
 }

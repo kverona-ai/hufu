@@ -1,8 +1,11 @@
 # Sample Hufu configuration.
 # Location: ~/.hufu/config.yaml (user-wide) or <project>/.hufu/config.yaml (project overrides).
-# This file describes the planned format; see doc/technical/technical-design.md, section 3.
+# Reference: doc/guide/user-guide.md, "Configuration".
 #
-# Model ids below are examples taken from vendor documentation in November 2026.
+# `hufu init` writes a smaller file from the agents it finds on your machine. Everything below can
+# also be set with `hufu profile add`, `hufu pool add` and `hufu config set`, or through the MCP tools.
+#
+# Model ids are examples taken from vendor documentation in November 2026.
 # Use the ids your own account offers (for instance from `agy models`).
 
 version: 1
@@ -13,19 +16,41 @@ defaults:
   timeout: 30m
   inactivity_timeout: 10m
   isolation: none              # or: worktree
+  retry:
+    max_attempts: 1            # total attempts for failures listed under `on`
+    "on": [rate_limited]
+    backoff: 15s
 
 limits:
   max_concurrent_jobs: 4
   per_profile:
     codex-high: 2
 
+# Who plans and who does the work when a command does not say.
+roles:
+  advisor: claude                         # one advisor: a profile, not a pool
+  executors: [codex-any, agy-fast, kimi]  # any number of executors: profiles or pools
+
 profiles:
   # --- Headless CLI adapters -------------------------------------------------
+
+  claude:
+    description: Claude Code; plans and reviews, and can operate the desktop
+    adapter: claude-cli
+    provides:
+      computer_use: {via: native}   # this profile supports computer use
 
   codex-high:
     description: Strong general executor for multi-file changes
     adapter: codex-cli
     model: gpt-6.1-sol
+    effort: high
+
+  codex-work:
+    description: The same agent with a second account
+    adapter: codex-cli
+    account: work                 # a label, shown in listings
+    home: ~/.codex-work           # that account's own login directory (CODEX_HOME)
     effort: high
 
   agy-fast:
@@ -40,32 +65,67 @@ profiles:
     description: Kimi Code over ACP, so that permission requests are answered by Hufu
     adapter: acp
     command: [kimi, acp]
-    permission_requests: unverified   # change to "verified" after checking this agent
-
-  cursor:
-    description: Cursor agent over ACP
-    adapter: acp
-    command: [agent, acp]
-    env: [CURSOR_API_KEY]
-    permission_requests: unverified
+    permission_requests: verified   # someone checked that this agent asks before it acts
+    allow_execute: ["npm test", "cargo test"]   # commands allowed at workspace-write
 
   # --- Open-API models through the pi harness --------------------------------
 
   or-reasoner:
-    description: A reasoning model on OpenRouter; a good advisor
+    description: A reasoning model on OpenRouter
     adapter: pi
     provider: openrouter
     model: vendor/model-slug          # any model slug the provider offers
     effort: high
     env: [OPENROUTER_API_KEY]         # the variable NAME; the value stays in your shell
-    allow_full_access: true           # pi has no permission system: full-access is its only tier
-    permission: full-access
 
-# Mission defaults (M3)
+  or-reasoner-team:
+    description: The same model on a second API key
+    adapter: pi
+    provider: openrouter
+    model: vendor/model-slug
+    account: team
+    env_from:
+      OPENROUTER_API_KEY: OPENROUTER_API_KEY_TEAM   # the agent sees the left name, Hufu reads the right one
+
+  # --- A profile that only operates the desktop ------------------------------
+
+  desk:
+    description: Desktop operator through LCU
+    adapter: codex-cli
+    provides:
+      computer_use: {via: lcu}
+
+# Profiles that can stand in for each other. A task may name a pool as its agent.
+pools:
+  codex-any:
+    description: Either Codex account
+    members: [codex-high, codex-work]
+    strategy: failover              # failover | round-robin | least-busy
+  reasoners:
+    members: [or-reasoner, or-reasoner-team]
+    strategy: round-robin
+
+# Which agent operates desktop applications when a task is granted computer use.
+capabilities:
+  computer_use:
+    route: dedicated                # dedicated: the profile below operates; executor: the job's own agent does
+    agent: desk                     # any profile that declares `provides.computer_use`
+    when_unavailable: error         # or: executor
+    max_concurrent: 1               # one job per display
+
 missions:
-  review: on_failure                  # or: always
-  max_tier: workspace-write           # no task in a mission may exceed this
-  acceptance_commands:                # commands an advisor-written check may run
+  review: on_failure                # always | on_failure | never
+  max_tier: workspace-write         # no task in a mission may exceed this
+  max_parallel: 2
+  acceptance_commands:              # command prefixes an advisor-written check may run
     - npm test
     - npm run typecheck
     - npm run lint
+  budgets:
+    max_tasks: 12
+    max_rounds_per_task: 3
+    max_wall_clock: 3h
+
+retention:
+  max_age: 30d
+  max_jobs: 2000
