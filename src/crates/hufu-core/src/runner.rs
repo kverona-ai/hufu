@@ -330,7 +330,7 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     } else {
         before = workspace::snapshot(&spec.cwd);
         shared.update(|s| {
-            s.workspace = Some(store::WorkspaceInfo { path: spec.cwd.display().to_string(), repo: before.as_ref().map(|b| b.root.display().to_string()), branch: None, base: None, worktree: false });
+            s.workspace = Some(store::WorkspaceInfo { path: spec.cwd.display().to_string(), repo: workspace::repo_root(&spec.cwd).map(|r| r.display().to_string()), branch: None, base: None, worktree: false });
         });
         spec.cwd.clone()
     };
@@ -338,7 +338,7 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     // 4. Attempts.
     let backoff = parse_duration(&spec.retry.backoff).unwrap_or(Duration::from_secs(15));
     let mut tries_on_member = 0u32;
-    let outcome = loop {
+    let mut outcome = loop {
         let profile = members[member];
         end.attempts += 1;
         tries_on_member += 1;
@@ -415,7 +415,8 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     let mut files: Vec<String> = match (&worktree, &before) {
         (Some(wt), _) => workspace::changed_since(&wt.path, &wt.base),
         (None, Some(b)) => workspace::snapshot(&spec.cwd).map(|after| workspace::changed(b, &after)).unwrap_or_default(),
-        (None, None) => outcome.touched_paths.clone(),
+        // Without a snapshot, what the agent reported is all there is. Agents name paths either way.
+        (None, None) => outcome.touched_paths.iter().map(|p| workspace::relative_to(&run_dir, p)).collect(),
     };
     files.sort();
     files.dedup();
@@ -490,13 +491,14 @@ fn drive(shared: &Shared, sink: &JobSink, spec: &JobSpec, config: &Config, adapt
     }
     if end.state == State::Succeeded {
         if let Some(wanted) = &spec.output_schema {
-            match &outcome.structured_output {
+            match outcome.structured_output.as_mut() {
                 None => {
                     end.state = State::Failed;
                     end.reason = Some(reason::INVALID_OUTPUT.into());
                     end.detail = Some("the task asked for structured output, but the final answer contains no JSON".into());
                 }
                 Some(value) => {
+                    schema::fill_nullable(wanted, value);
                     let errors = schema::validate(wanted, value);
                     if !errors.is_empty() {
                         end.state = State::Failed;

@@ -142,6 +142,8 @@ impl Adapter for CodexCli {
                 return RunOutcome::failed(hufu_contract::reason::INTERNAL, format!("cannot write {}: {e}", path.display()));
             }
         }
+        // A file left by an earlier attempt must not be taken for this attempt's answer.
+        let _ = std::fs::remove_file(req.scratch_dir.join("last-message.txt"));
         let mut c = Collected::default();
         let ended = common::run_plan(profile, DEFAULT, req, &plan, sink, cancel, &mut |stream, line| {
             if stream == RawStream::Stdout {

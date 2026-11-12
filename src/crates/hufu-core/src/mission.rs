@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use crate::capability;
 use crate::config::{AgentRef, Budgets, Config, Grant, Home, Isolation, ReviewPolicy};
 use crate::error::{HufuError, IoContext, Result};
-use crate::spec::{Check, OutputSpec, SchemaRef, TaskSpec};
+use crate::spec::{Check, JobSpec, OutputSpec, SchemaRef, TaskSpec};
 use crate::store::{self, JobResult, State, Verdict};
 use crate::submit::{self, Context, Options};
 use crate::{runner, workspace};
@@ -153,25 +153,34 @@ pub struct PlanTask {
     pub permission: Option<Tier>,
     #[serde(default)]
     pub effort: Option<Effort>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub depends_on: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub acceptance: Vec<Check>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub grants: Vec<Grant>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Plan {
-    #[serde(default = "one")]
+    #[serde(default = "one", deserialize_with = "null_one")]
     pub v: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub summary: String,
     pub tasks: Vec<PlanTask>,
 }
 
 fn one() -> u32 {
     1
+}
+
+/// Reads `null` as the type's default: an advisor may write `null` for what it leaves open.
+fn null_default<'de, D: serde::Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> std::result::Result<T, D::Error> {
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
+fn null_one<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<u32, D::Error> {
+    Ok(Option::<u32>::deserialize(d)?.unwrap_or(1))
 }
 
 /// The limits a mission runs under, fixed when it starts.
@@ -385,20 +394,23 @@ pub fn launch(home: &Home, id: &str) -> Result<u32> {
 // Prompts and schemas
 // ---------------------------------------------------------------------------------------------
 
+/// The plan an advisor writes. Every property is required and the optional ones admit `null`,
+/// which is what agents with strict structured output need; see `schema::fill_nullable` for the
+/// agents that leave properties out.
 fn plan_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["v", "summary", "tasks"],
         "properties": {
-            "v": {"type": "integer"},
-            "summary": {"type": "string"},
+            "v": {"type": ["integer", "null"]},
+            "summary": {"type": ["string", "null"]},
             "tasks": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["id", "title", "prompt", "agent", "permission", "effort", "depends_on", "acceptance"],
+                    "required": ["id", "title", "prompt", "agent", "permission", "effort", "depends_on", "acceptance", "grants"],
                     "properties": {
                         "id": {"type": "string"},
                         "title": {"type": "string"},
@@ -406,8 +418,9 @@ fn plan_schema() -> Value {
                         "agent": {"type": "string"},
                         "permission": {"type": ["string", "null"]},
                         "effort": {"type": ["string", "null"]},
-                        "depends_on": {"type": "array", "items": {"type": "string"}},
-                        "acceptance": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["command"], "properties": {"command": {"type": "string"}}}}
+                        "depends_on": {"type": ["array", "null"], "items": {"type": "string"}},
+                        "acceptance": {"type": ["array", "null"], "items": {"type": "object", "additionalProperties": false, "required": ["command"], "properties": {"command": {"type": "string"}}}},
+                        "grants": {"type": ["array", "null"], "items": {"type": "object", "additionalProperties": false, "required": ["capability", "apps"], "properties": {"capability": {"type": "string"}, "apps": {"type": "array", "items": {"type": "string"}}}}}
                     }
                 }
             }
@@ -421,7 +434,7 @@ fn review_schema() -> Value {
         "additionalProperties": false,
         "required": ["v", "verdict", "reason", "follow_up"],
         "properties": {
-            "v": {"type": "integer"},
+            "v": {"type": ["integer", "null"]},
             "verdict": {"type": "string", "enum": ["accept", "revise", "abort"]},
             "reason": {"type": "string"},
             "follow_up": {"type": ["string", "null"]}
@@ -743,7 +756,11 @@ impl Driver<'_> {
         if let Some(previous) = resume_from {
             let resumable = store::load_result(self.home(), previous).ok().flatten().and_then(|r| r.session).map(|s| s.resumable).unwrap_or(false);
             if resumable {
-                if let Ok(state) = submit::resume(&self.ctx, previous, &prompt, true) {
+                let edit = |spec: &mut JobSpec| {
+                    spec.title = title.to_string();
+                    spec.output_schema = Some(schema.clone());
+                };
+                if let Ok(state) = submit::resume(&self.ctx, previous, &prompt, true, edit) {
                     (self.start)(self.home(), &state.id)?;
                     return Ok(state.id);
                 }
@@ -848,7 +865,7 @@ impl Driver<'_> {
         if let (Some((feedback, _)), Some(prev)) = (&follow_up, &previous) {
             let resumable = store::load_result(self.home(), prev).ok().flatten().and_then(|r| r.session).map(|s| s.resumable).unwrap_or(false);
             if resumable {
-                if let Ok(state) = submit::resume(&self.ctx, prev, &format!("A reviewer looked at your work and asks for changes:\n{feedback}"), true) {
+                if let Ok(state) = submit::resume(&self.ctx, prev, &format!("A reviewer looked at your work and asks for changes:\n{feedback}"), true, |spec| spec.title = format!("{} (revision)", task.title)) {
                     started = Some(state.id);
                 }
             }
@@ -1128,6 +1145,24 @@ pub fn pause(home: &Home, id: &str) -> Result<()> {
     std::fs::write(&path, now_rfc3339()).at(&path)
 }
 
+/// Continues a paused mission, or one whose driver is gone.
+pub fn resume(home: &Home, id: &str) -> Result<()> {
+    let mut mission = load(home, id)?;
+    if mission.state.is_terminal() {
+        return Err(HufuError::usage(format!("mission `{id}` has already ended ({})", mission.state.as_str())));
+    }
+    if mission.state != MissionState::Paused && mission.driver_pid.map(proc::pid_alive).unwrap_or(false) {
+        return Err(HufuError::usage(format!("mission `{id}` is already being driven")));
+    }
+    let _ = std::fs::remove_file(file(home, id, "pause.request"));
+    if mission.state == MissionState::Paused {
+        // Leave "paused" before the driver is up, so that a caller that waits right away waits.
+        mission.state = if mission.tasks.is_empty() { MissionState::Planning } else { MissionState::Running };
+        save(home, &mission)?;
+    }
+    launch(home, id).map(|_| ())
+}
+
 /// Asks a mission to stop now: running jobs are cancelled.
 pub fn abort(home: &Home, id: &str) -> Result<Mission> {
     let mut mission = load(home, id)?;
@@ -1229,10 +1264,16 @@ mod tests {
 
     #[test]
     fn schemas_accept_the_documented_shapes() {
-        let plan = json!({"v": 1, "summary": "s", "tasks": [{"id": "t1", "title": "T", "prompt": "p", "agent": "a", "permission": null, "effort": "high", "depends_on": [], "acceptance": [{"command": "npm test"}]}]});
+        let plan = json!({"v": 1, "summary": "s", "tasks": [{"id": "t1", "title": "T", "prompt": "p", "agent": "a", "permission": null, "effort": "high", "depends_on": [], "acceptance": [{"command": "npm test"}], "grants": null}]});
         assert!(schema::validate(&plan_schema(), &plan).is_empty());
         let parsed: Plan = serde_json::from_value(plan).unwrap();
         assert_eq!(parsed.tasks[0].effort, Some(Effort::High));
+        // An advisor that is only told about the schema may leave out what it has nothing to say about.
+        let mut short = json!({"tasks": [{"id": "t1", "title": "T", "prompt": "p", "agent": "a"}]});
+        schema::fill_nullable(&plan_schema(), &mut short);
+        assert!(schema::validate(&plan_schema(), &short).is_empty(), "{short}");
+        let parsed: Plan = serde_json::from_value(short).unwrap();
+        assert_eq!((parsed.v, parsed.tasks[0].depends_on.len(), parsed.tasks[0].grants.len()), (1, 0, 0));
         let review = json!({"v": 1, "verdict": "revise", "reason": "r", "follow_up": "do x"});
         assert!(schema::validate(&review_schema(), &review).is_empty());
         assert!(!schema::validate(&review_schema(), &json!({"v": 1, "verdict": "maybe", "reason": "", "follow_up": null})).is_empty());

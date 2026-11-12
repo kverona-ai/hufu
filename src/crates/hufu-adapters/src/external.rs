@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use hufu_contract::proc;
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, EventBody, EventSink, LaunchPlan, Profile, ProbeResult, RawStream,
-    RunOutcome, RunRequest, StructuredOutput, Tier, reason,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, Profile, ProbeResult, RawStream,
+    RunOutcome, RunRequest, StructuredOutput, reason,
 };
 use serde_json::{Value, json};
 
@@ -112,21 +112,28 @@ impl Adapter for External {
         })
     }
 
-    fn plan(&self, profile: &Profile, _req: &RunRequest) -> Result<LaunchPlan, AdapterError> {
+    fn plan(&self, profile: &Profile, req: &RunRequest) -> Result<LaunchPlan, AdapterError> {
         if profile.command.is_empty() {
             return Err(AdapterError(format!("profile `{}`: adapter `external` needs `command`, the adapter program", profile.name)));
         }
+        // The program declares what it can do; a request beyond that never reaches it.
+        let caps = self.capabilities(profile);
+        if !caps.supports_tier(req.permission) {
+            return Err(AdapterError(format!("profile `{}`: the adapter program does not offer the `{}` tier", profile.name, req.permission)));
+        }
+        let effort_ok = match &req.effort {
+            Effort::Default => true,
+            Effort::Native(_) => caps.native_effort,
+            level => caps.efforts.contains(level),
+        };
+        if !effort_ok {
+            return Err(AdapterError(format!("profile `{}`: the adapter program has no mapping for effort `{}`", profile.name, req.effort)));
+        }
+        if req.resume_session.is_some() && !caps.resume {
+            return Err(AdapterError(format!("profile `{}`: the adapter program cannot resume a session", profile.name)));
+        }
         let mut plan = common::plan_start(profile, &[]);
         plan.args.push("run".into());
-        plan.notes.push("the request is sent as JSON on stdin".into());
-        Ok(plan)
-    }
-
-    fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome {
-        let mut plan = match self.plan(profile, req) {
-            Ok(p) => p,
-            Err(e) => return RunOutcome::failed(reason::UNSUPPORTED, e.0),
-        };
         plan.stdin = Some(
             json!({
                 "v": 1,
@@ -139,6 +146,15 @@ impl Adapter for External {
             })
             .to_string(),
         );
+        plan.notes.push("the request, including the permission tier, is sent as JSON on stdin".into());
+        Ok(plan)
+    }
+
+    fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome {
+        let plan = match self.plan(profile, req) {
+            Ok(p) => p,
+            Err(e) => return RunOutcome::failed(reason::UNSUPPORTED, e.0),
+        };
         let mut outcome: Option<RunOutcome> = None;
         let ended = common::run_plan(profile, &[], req, &plan, sink, cancel, &mut |stream, line| {
             if stream != RawStream::Stdout {
@@ -161,8 +177,8 @@ impl Adapter for External {
         }
         match outcome {
             Some(mut out) => {
-                // An external adapter may not claim more than it was asked to do.
-                if req.permission != Tier::FullAccess && out.status == hufu_contract::RunStatus::Succeeded && out.final_message.as_deref().unwrap_or("").trim().is_empty() {
+                // Success without an answer is not success, whatever the program says.
+                if out.status == hufu_contract::RunStatus::Succeeded && out.final_message.as_deref().unwrap_or("").trim().is_empty() {
                     out = RunOutcome::failed(reason::EMPTY_OUTPUT, "the adapter reported success without a final message");
                 }
                 out.exit_code = ended.exit_code;

@@ -387,7 +387,7 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             let spec = store::load_spec(home, &id)?;
             let loaded = config::load(home, &spec.cwd)?;
             let ctx = Context { home, config: &loaded.config, adapters };
-            let state = submit::resume(&ctx, &id, need(args, "prompt")?, false)?;
+            let state = submit::resume(&ctx, &id, need(args, "prompt")?, false, |_| {})?;
             Ok(job_view(&state))
         }
         "hufu_mission_start" => {

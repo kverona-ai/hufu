@@ -448,7 +448,7 @@ fn cmd_resume(app: &App, a: ResumeArgs) -> Result<i32> {
     let spec = store::load_spec(&app.home, &id)?;
     let loaded = config::load(&app.home, &spec.cwd)?;
     let ctx = Context { home: &app.home, config: &loaded.config, adapters: &app.adapters };
-    let state = submit::resume(&ctx, &id, &prompt, false)?;
+    let state = submit::resume(&ctx, &id, &prompt, false, |_| {})?;
     if a.wait {
         runner::wait(&app.home, &state.id, None)?;
         return cmd_result(app, &state.id, false);
@@ -636,14 +636,7 @@ fn cmd_mission(app: &App, c: MissionCommand) -> Result<i32> {
         }
         MissionCommand::Resume { mission: partial } => {
             let id = mission::resolve(home, &partial)?;
-            let m = mission::load(home, &id)?;
-            if m.state.is_terminal() {
-                return Err(HufuError::usage(format!("mission `{id}` has already ended ({})", m.state.as_str())));
-            }
-            if m.driver_pid.map(hufu_contract::proc::pid_alive).unwrap_or(false) && m.state != MissionState::Paused {
-                return Err(HufuError::usage(format!("mission `{id}` is already being driven")));
-            }
-            mission::launch(home, &id)?;
+            mission::resume(home, &id)?;
             app.out(&json!({"mission": id, "resumed": true}), || println!("{id} resumed"));
             Ok(exit::OK)
         }

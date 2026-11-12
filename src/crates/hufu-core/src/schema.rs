@@ -14,6 +14,56 @@ pub fn validate(schema: &Value, value: &Value) -> Vec<String> {
     errors
 }
 
+fn admits_null(schema: &Value) -> bool {
+    match schema.get("type") {
+        Some(Value::String(t)) => t == "null",
+        Some(Value::Array(ts)) => ts.iter().any(|t| t == "null"),
+        _ => false,
+    }
+}
+
+/// Writes `null` for every required property that is absent and whose schema admits `null`.
+///
+/// Agents that are held to a schema by their own API send every property. Agents that are only
+/// told about the schema tend to leave out what they have nothing to say about, and this keeps
+/// their answer usable without loosening what the schema demands.
+pub fn fill_nullable(schema: &Value, value: &mut Value) {
+    fill(schema, schema, value, 0);
+}
+
+fn fill(root: &Value, schema: &Value, value: &mut Value, depth: usize) {
+    if depth > 64 {
+        return;
+    }
+    let schema = match schema.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix('#')).and_then(|p| root.pointer(p)) {
+        Some(target) => target,
+        None => schema,
+    };
+    match value {
+        Value::Object(map) => {
+            let Some(props) = schema.get("properties").and_then(Value::as_object) else { return };
+            for name in schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                if !map.contains_key(name) && props.get(name).map(admits_null).unwrap_or(false) {
+                    map.insert(name.to_string(), Value::Null);
+                }
+            }
+            for (key, child) in map.iter_mut() {
+                if let Some(sub) = props.get(key) {
+                    fill(root, sub, child, depth + 1);
+                }
+            }
+        }
+        Value::Array(items) => {
+            if let Some(sub) = schema.get("items") {
+                for item in items.iter_mut() {
+                    fill(root, sub, item, depth + 1);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn type_matches(name: &str, v: &Value) -> bool {
     match name {
         "object" => v.is_object(),
@@ -203,5 +253,23 @@ mod tests {
         assert!(validate(&json!({"type": ["string", "null"]}), &json!(null)).is_empty());
         assert!(validate(&json!({"anyOf": [{"type": "string"}, {"type": "number"}]}), &json!(3)).is_empty());
         assert_eq!(validate(&json!({"oneOf": [{"type": "number"}, {"minimum": 1}]}), &json!(3)).len(), 1);
+    }
+
+    #[test]
+    fn absent_nullable_properties_are_filled_in() {
+        let schema = json!({
+            "type": "object",
+            "required": ["id", "note", "items"],
+            "properties": {
+                "id": {"type": "string"},
+                "note": {"type": ["string", "null"]},
+                "items": {"type": "array", "items": {"type": "object", "required": ["tag"], "properties": {"tag": {"type": ["string", "null"]}}}}
+            }
+        });
+        let mut value = json!({"items": [{}]});
+        super::fill_nullable(&schema, &mut value);
+        assert_eq!(value, json!({"note": null, "items": [{"tag": null}]}));
+        // What may not be null is still missing, and still reported.
+        assert_eq!(validate(&schema, &value), vec!["$: missing required property `id`".to_string()]);
     }
 }

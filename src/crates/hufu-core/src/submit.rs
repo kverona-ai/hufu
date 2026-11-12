@@ -464,8 +464,9 @@ pub fn submit_spec(home: &Home, spec: &JobSpec, hold: bool) -> Result<JobState> 
     Ok(state)
 }
 
-/// Submits a follow-up prompt to the session of a finished job.
-pub fn resume(ctx: &Context, previous: &str, prompt: &str, hold: bool) -> Result<JobState> {
+/// Starts a follow-up in the session of a finished job. The follow-up keeps the workspace, tier,
+/// acceptance checks and output schema of that job; `edit` may change what differs this time.
+pub fn resume(ctx: &Context, previous: &str, prompt: &str, hold: bool, edit: impl FnOnce(&mut JobSpec)) -> Result<JobState> {
     let old = store::load_spec(ctx.home, previous)?;
     let state = store::load_state(ctx.home, previous)?;
     if !state.state.is_terminal() {
@@ -508,6 +509,7 @@ pub fn resume(ctx: &Context, previous: &str, prompt: &str, hold: bool) -> Result
             spec.isolation = Isolation::None;
         }
     }
+    edit(&mut spec);
     let mut state = store::create_job(ctx.home, &spec)?;
     if !hold {
         if daemon_info(ctx.home).is_some() {

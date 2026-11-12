@@ -39,9 +39,63 @@ pub struct Snapshot {
     pub dirty: BTreeMap<String, String>,
 }
 
-/// Takes a snapshot. `None` when `cwd` is not inside a git work tree.
+/// The most files a directory outside git may hold for Hufu to fingerprint it.
+const PLAIN_LIMIT: usize = 20_000;
+
+fn stamp_of(path: &Path) -> String {
+    match std::fs::metadata(path) {
+        Ok(m) => {
+            let modified = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+            format!("{}:{modified}", m.len())
+        }
+        Err(_) => "gone".into(),
+    }
+}
+
+fn slashes(text: &str) -> String {
+    if cfg!(windows) { text.replace('\\', "/") } else { text.to_string() }
+}
+
+/// A path as the agent named it, relative to the workspace when it lies inside, with `/`.
+pub fn relative_to(root: &Path, path: &str) -> String {
+    let p = Path::new(path);
+    let inside = p.strip_prefix(root).map(Path::to_path_buf).ok().or_else(|| {
+        let canonical = root.canonicalize().ok()?;
+        p.strip_prefix(&canonical).map(Path::to_path_buf).ok()
+    });
+    match inside {
+        Some(rel) => slashes(&rel.to_string_lossy()),
+        None => slashes(path),
+    }
+}
+
+/// Fingerprints every file of a directory that is not under git. `None` when it is too large.
+fn snapshot_plain(cwd: &Path) -> Option<Snapshot> {
+    let mut dirty = BTreeMap::new();
+    let mut pending = vec![cwd.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).ok()?.flatten() {
+            let path = entry.path();
+            let kind = entry.file_type().ok()?;
+            if kind.is_dir() {
+                pending.push(path);
+            } else {
+                if dirty.len() >= PLAIN_LIMIT {
+                    return None;
+                }
+                dirty.insert(slashes(&path.strip_prefix(cwd).unwrap_or(&path).to_string_lossy()), stamp_of(&path));
+            }
+        }
+    }
+    Some(Snapshot { root: cwd.to_path_buf(), head: None, dirty })
+}
+
+/// Takes a snapshot: through git inside a work tree, by fingerprinting the files elsewhere.
+/// `None` when neither is possible (a very large directory outside git).
 pub fn snapshot(cwd: &Path) -> Option<Snapshot> {
-    let root = repo_root(cwd)?;
+    let Some(root) = repo_root(cwd) else {
+        return snapshot_plain(cwd);
+    };
     let status = git(&root, &["status", "--porcelain=v1", "-z", "--untracked-files=all"]).filter(Captured::ok)?;
     let mut dirty = BTreeMap::new();
     let mut entries = status.stdout.split('\0');
@@ -53,13 +107,7 @@ pub fn snapshot(cwd: &Path) -> Option<Snapshot> {
         if code.starts_with('R') || code.starts_with('C') {
             entries.next(); // the original path of a rename or copy
         }
-        let meta = std::fs::metadata(root.join(path)).ok();
-        let stamp = meta
-            .map(|m| {
-                let modified = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
-                format!("{}:{modified}", m.len())
-            })
-            .unwrap_or_else(|| "gone".into());
+        let stamp = stamp_of(&root.join(path));
         dirty.insert(path.to_string(), format!("{}|{stamp}", code.trim()));
     }
     Some(Snapshot { head: head(&root), root, dirty })

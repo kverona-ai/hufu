@@ -9,7 +9,7 @@
 //! `[[fake:<scenario>=<argument>]]`, or by the `HUFU_FAKE_SCENARIO` variable. Scenarios:
 //! `ok` (default), `write[=file]`, `deny`, `json[=text]`, `reply=text`, `env=VAR`, `args`,
 //! `slow[=ms]`, `hang`, `silent`, `crash`, `empty`, `malformed`, `auth`, `rate-limit`,
-//! `permission` (ACP only).
+//! `permission` and `refuse` (ACP only).
 
 pub mod conformance;
 
@@ -495,6 +495,11 @@ fn acp(argv: &[String]) -> i32 {
                         continue;
                     }
                     "crash" => return 2,
+                    "malformed" => {
+                        out("this is not json");
+                        out("{\"unterminated\": ");
+                        return 0;
+                    }
                     "empty" => {
                         reply(&id, json!({"stopReason": "end_turn"}));
                         continue;

@@ -90,7 +90,8 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
     out.push(("C1", {
         let plans: Vec<_> = caps.permission_tiers.iter().map(|t| (*t, s.adapter.plan(&profile, &s.request("ok", *t)))).collect();
         let all_ok = plans.iter().all(|(_, p)| p.is_ok());
-        let args: Vec<Vec<String>> = plans.iter().filter_map(|(_, p)| p.as_ref().ok().map(|p| p.args.clone())).collect();
+        // The tier may be spelled in the arguments or in what is sent on stdin.
+        let args: Vec<(Vec<String>, Option<String>)> = plans.iter().filter_map(|(_, p)| p.as_ref().ok().map(|p| (p.args.clone(), p.stdin.clone()))).collect();
         let distinct = caps.checked_at_runtime || args.iter().enumerate().all(|(i, a)| args.iter().skip(i + 1).all(|b| a != b));
         expect(!caps.permission_tiers.is_empty() && all_ok && distinct, || format!("plans for {:?} are missing or identical: {plans:?}", caps.permission_tiers))
     }));
@@ -179,7 +180,9 @@ pub fn run_all(s: &Subject) -> Vec<(&'static str, Result<(), String>)> {
     out.push(("C10", {
         let (o, sink) = s.run(&s.request("reply=raw-marker-7f3a", tier));
         let raw = sink.stdout.lock().map(|l| l.join("\n")).unwrap_or_default();
-        expect(o.status == RunStatus::Succeeded && raw.contains("raw-marker-7f3a"), || format!("the raw log does not contain the agent's output: {:?} {raw}", o.reason))
+        // An agent may stream its answer in pieces, so look for both ends of the marker.
+        let kept = raw.contains("raw-marker-7f3a") || (raw.contains("raw-") && raw.contains("7f3a"));
+        expect(o.status == RunStatus::Succeeded && o.final_message.as_deref() == Some("raw-marker-7f3a") && kept, || format!("the raw log does not contain the agent's output: {:?} {raw}", o.reason))
     }));
 
     // C11: a follow-up reaches the agent's own resume mechanism, or the capability is absent.
