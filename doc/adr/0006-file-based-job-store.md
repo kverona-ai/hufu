@@ -29,7 +29,7 @@ daemon may keep an index, with the files remaining the source of truth.
 
 | Alternative | Why not now |
 |---|---|
-| SQLite from the start | Solves a problem not yet present; concurrent writers from many short-lived processes need care; a native dependency or a newer runtime feature; job logs still need files |
+| SQLite from the start | Solves a problem not yet present; concurrent writers from many short-lived processes need care; job logs still need files |
 | An embedded key-value store | Same concerns, less tooling |
 | A daemon that owns all state from M1 | Makes the first milestone much larger and the tool harder to debug |
 

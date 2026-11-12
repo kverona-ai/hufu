@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="许可证：Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-d9931f"></a>
   <a href="doc/roadmap.md"><img alt="状态：设计阶段" src="https://img.shields.io/badge/status-design%20phase-b3261e"></a>
-  <img alt="Node.js 22.19 及以上" src="https://img.shields.io/badge/node-%E2%89%A5%2022.19-3c873a">
+  <a href="doc/adr/0007-implement-in-rust.md"><img alt="使用 Rust 编写" src="https://img.shields.io/badge/built%20with-Rust-b7410e"></a>
   <a href="doc/research/agent-landscape.md"><img alt="Agent Client Protocol v1" src="https://img.shields.io/badge/ACP-v1-4b6bfb"></a>
   <a href="CONTRIBUTING.md"><img alt="欢迎反馈" src="https://img.shields.io/badge/feedback-welcome-8f8779"></a>
 </p>
@@ -87,6 +87,8 @@ flowchart LR
 | ✅ **合符检查** | 退出码为 `0` 不等于成功，由验收检查决定工作是否被接受 |
 | 🌐 **开放 API 模型** | OpenRouter、DeepSeek、Z.ai、Kimi 编码套餐上的任意模型，套上 pi 就是一个 Agent |
 | 🔌 **优先走 ACP** | 新增一个支持 Agent Client Protocol 的 Agent，只需要几行配置 |
+| 🦀 **单个二进制** | 用 Rust 编写，只有一个自包含的 `hufu` 命令，不需要安装任何运行时 |
+| 🖥️ **可路由的 computer use**（规划中） | 任务可以通过专门的操作 Agent 或执行者自己的 Agent 使用桌面，由配置决定，并且必须显式授权 |
 
 ## 快速预览
 
@@ -154,10 +156,11 @@ profiles:
 | 阶段 | 主题 | 状态 |
 |---|---|---|
 | **M0** | 打地基：需求、调研、架构、仓库结构 | 🟡 进行中 |
-| **M1** | 第一次调度：核心、CLI、Codex 和 Antigravity 适配器、Claude Code skill | ⚪ 计划中 |
+| **M1** | 第一次调度：核心、CLI、Codex 和 Antigravity 两个适配器、Claude Code skill | ⚪ 计划中 |
 | **M2** | 接入更多 Agent：通用 ACP 适配器、pi、git worktree 隔离 | ⚪ 计划中 |
 | **M3** | 可插拔指挥者：mission、合符检查、预算 | ⚪ 计划中 |
 | **M4** | 常驻运行：守护进程、并发配额、MCP 服务 | ⚪ 计划中 |
+| **M5** | 走出工作区：computer use 能力路由 | ⚪ 计划中 |
 
 详见 [doc/roadmap.md](doc/roadmap.md)。
 
@@ -170,8 +173,9 @@ profiles:
 | [需求](doc/requirements/requirements.md) | 目标、用户、场景、功能性与非功能性需求 |
 | [Agent 调研](doc/research/agent-landscape.md) | 各 Agent 的无头调用方式；Agent Client Protocol |
 | [同类项目与命名](doc/research/prior-art.md) | 已有的编排器，以及 Hufu 的差异 |
+| [computer use 调研](doc/research/computer-use.md) | 从 LCU 项目中借鉴的 computer use 路由设计 |
 | [架构](doc/architecture/architecture.md) | 组件、角色、作业与 mission 的生命周期、安全模型 |
-| [技术设计](doc/technical/technical-design.md) | 技术栈、配置、任务规格、CLI、作业存储、mission、测试 |
+| [技术设计](doc/technical/technical-design.md) | Rust 技术栈与 crate 结构、配置、任务规格、CLI、作业存储、mission、测试 |
 | [适配器契约](doc/technical/adapter-contract.md) | 适配器接口；各 Agent 的权限与推理强度映射 |
 | [部署](doc/deployment/deployment.md) | 安装、配置、接入宿主、运维 |
 | [云端开发环境](doc/deployment/cloud-environment.md) | 云端开发会话需要的环境配置 |
@@ -188,7 +192,7 @@ hufu/
 ├── CONTRIBUTING.md
 ├── LICENSE              Apache-2.0
 ├── doc/                 所有文档：需求、调研、架构、技术设计、部署、决策记录、示例
-└── src/                 所有代码，连同包清单和测试（从 M1 开始）
+└── src/                 所有代码：一个 Cargo workspace，连同测试（从 M1 开始）
 ```
 
 ## 名字的由来

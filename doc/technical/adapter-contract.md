@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for review. Nothing here is implemented yet |
-| **Last updated** | 2026-11-12 |
+| **Last updated** | 2026-11-12 (interface rewritten as a Rust trait) |
 | **Related** | [Agent landscape](../research/agent-landscape.md), [Technical design](technical-design.md), [ADR-0002](../adr/0002-acp-first-cli-fallback.md), [ADR-0005](../adr/0005-explicit-permission-and-effort-mapping.md) |
 
 An adapter is the only code that knows how one kind of agent is driven. This document defines what
@@ -16,54 +16,63 @@ the installed CLI before its adapter ships.
 
 ## 1. Interface
 
-```ts
-export interface Adapter {
-  /** Adapter kind, e.g. "acp", "codex-cli". */
-  readonly kind: string;
+The contract lives in the `hufu-contract` crate. Sketch:
 
-  /** Is the agent installed? Which version? Is it logged in, if that can be told cheaply? */
-  probe(profile: ResolvedProfile): Promise<ProbeResult>;
+```rust
+#[async_trait]
+pub trait Adapter: Send + Sync {
+    /// Adapter kind, e.g. "acp", "codex-cli".
+    fn kind(&self) -> &'static str;
 
-  /** What this profile can do. Used to validate a task before anything runs. */
-  capabilities(profile: ResolvedProfile): Promise<Capabilities>;
+    /// Is the agent installed? Which version? Is it logged in, if that can be told cheaply?
+    async fn probe(&self, profile: &ResolvedProfile) -> ProbeResult;
 
-  /**
-   * Run one prompt to completion. Emit normalized events to `sink` as they happen.
-   * Must honour `signal` by stopping the agent. Must not throw for agent-side failures;
-   * those are returned in the outcome.
-   */
-  run(request: RunRequest, sink: EventSink, signal: AbortSignal): Promise<RunOutcome>;
+    /// What this profile can do. Used to validate a task before anything runs.
+    async fn capabilities(&self, profile: &ResolvedProfile) -> Result<Capabilities, AdapterError>;
+
+    /// Run one prompt to completion. Emit normalized events to `sink` as they happen.
+    /// Must stop the agent when `cancel` fires. Agent-side failures are not errors of
+    /// this call; they are returned in the outcome.
+    async fn run(
+        &self,
+        request: RunRequest,
+        sink: &dyn EventSink,
+        cancel: CancellationToken,
+    ) -> RunOutcome;
 }
 
-export interface Capabilities {
-  permissionTiers: PermissionTier[];            // tiers this profile can truly honour
-  efforts: Effort[];                            // levels with an exact native mapping
-  models: string[] | "any" | "unknown";         // "any": passed through unchecked
-  resume: boolean;                              // can a later prompt continue this session?
-  structuredOutput: boolean;                    // can the agent be held to a JSON Schema?
-  reportsUsage: boolean;
-  reportsDenials: boolean;                      // can skipped actions be detected reliably?
+pub struct Capabilities {
+    pub permission_tiers: Vec<PermissionTier>, // tiers this profile can truly honour
+    pub efforts: Vec<Effort>,                  // levels with an exact native mapping
+    pub models: ModelSupport,                  // List(ids) | Any (passed through) | Unknown
+    pub resume: bool,                          // can a later prompt continue this session?
+    pub structured_output: bool,               // can the agent be held to a JSON Schema?
+    pub reports_usage: bool,
+    pub reports_denials: bool,                 // can skipped actions be detected reliably?
+    pub accepts_mcp_servers: bool,             // can Hufu attach an MCP server to the session?
+    pub provides: Vec<Capability>,             // e.g. ComputerUse (planned)
 }
 
-export interface RunRequest {
-  prompt: string;
-  cwd: string;
-  permission: PermissionTier;                   // always explicit
-  effort: Effort;                               // "default" means: pass nothing
-  model?: string;
-  outputSchema?: object;
-  resumeSession?: string;
-  env: Record<string, string>;                  // already filtered by the runner
+pub struct RunRequest {
+    pub prompt: String,
+    pub cwd: PathBuf,
+    pub permission: PermissionTier,            // always explicit
+    pub effort: Effort,                        // Effort::Default means: pass nothing
+    pub model: Option<String>,
+    pub output_schema: Option<serde_json::Value>,
+    pub resume_session: Option<String>,
+    pub env: BTreeMap<String, String>,         // already filtered by the runner
+    pub mcp_servers: Vec<McpServerSpec>,       // servers Hufu attaches, if any
 }
 
-export interface RunOutcome {
-  status: "completed" | "failed" | "cancelled";
-  reason?: FailureReason;                       // e.g. "auth_required", "empty_output"
-  finalMessage?: string;
-  structuredOutput?: unknown;
-  deniedActions: DeniedAction[];
-  session?: { id: string; resumable: boolean };
-  usage?: Usage;
+pub struct RunOutcome {
+    pub status: RunStatus,                     // Completed | Failed | Cancelled
+    pub reason: Option<FailureReason>,         // e.g. AuthRequired, EmptyOutput
+    pub final_message: Option<String>,
+    pub structured_output: Option<serde_json::Value>,
+    pub denied_actions: Vec<DeniedAction>,
+    pub session: Option<SessionRef>,           // id and whether it can be resumed
+    pub usage: Option<Usage>,
 }
 ```
 
@@ -196,8 +205,8 @@ agy -p <prompt> --output-format stream-json [--model <slug>] [--effort <level>] 
 - **Empty stdout without a TTY** is a reported bug
   ([#76](https://github.com/google-antigravity/antigravity-cli/issues/76)) ⚠️. The adapter treats
   "exit 0, no result event" as `empty_output`. If the installed version is affected, the fallback
-  is to run `agy` under a pseudo-terminal; this is the only reason Hufu might carry a PTY
-  dependency, and the decision is deferred until M1 testing on a real install.
+  is to run `agy` under a pseudo-terminal; the `portable-pty` crate covers this, and whether it is
+  needed is decided during M1 testing on a real install.
 - **Soft denial.** Without `--dangerously-skip-permissions`, actions needing approval are skipped
   and the process exits `0`. Denial detection is mandatory.
 - **No default timeout** (`--print-timeout` defaults to no limit). Hufu's own timers apply.
@@ -253,7 +262,7 @@ pi --mode json -p <prompt> --provider <name> --model <provider/id> [--thinking <
 - `full-access` is the only tier. pi's own advice is to run it in a container.
 - Non-interactive modes show no project trust prompt.
 - Resume: `--session <id>`.
-- Requires Node.js ≥ 22.19.
+- pi itself requires Node.js ≥ 22.19. Hufu does not.
 
 ### 5.6 Claude Code
 
@@ -303,14 +312,14 @@ transcripts:
 | # | Assertion |
 |---|---|
 | C1 | The invocation contains an explicit tier flag or policy for every supported tier |
-| C2 | A tier not in `capabilities().permissionTiers` is never launched |
+| C2 | A tier not in `capabilities().permission_tiers` is never launched |
 | C3 | An effort level not in `capabilities().efforts` is never launched, unless fallback is enabled, in which case a warning is emitted |
 | C4 | Exit `0` with no final message yields `failed / empty_output` |
-| C5 | A transcript containing a skipped action yields a `permission.denied` event and a non-empty `deniedActions` |
+| C5 | A transcript containing a skipped action yields a `permission.denied` event and a non-empty `denied_actions` |
 | C6 | Abort stops the fake agent within the grace period and yields `cancelled` |
 | C7 | A hanging agent is ended by the runner's timeout and no child process survives |
 | C8 | Missing login yields `failed / auth_required` with a hint, and no hang |
 | C9 | Malformed output lines are logged as warnings and do not crash the adapter |
 | C10 | Raw output is preserved byte for byte |
-| C11 | `resumeSession` reaches the agent as its native resume mechanism, or the capability is absent |
+| C11 | `resume_session` reaches the agent as its native resume mechanism, or the capability is absent |
 | C12 | No environment variable outside the request's `env` reaches the agent |

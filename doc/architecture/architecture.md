@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for review |
-| **Last updated** | 2026-11-12 |
+| **Last updated** | 2026-11-12 (Rust, capability routing) |
 | **Related** | [Requirements](../requirements/requirements.md), [Technical design](../technical/technical-design.md), [ADRs](../adr/README.md) |
 
 This document describes the shape of the system: its parts, how they talk to each other, what
@@ -332,12 +332,13 @@ Limits that the design cannot remove:
 
 | Concern | Choice | Reason |
 |---|---|---|
-| Language and runtime | TypeScript on Node.js 22 or later | Reference ACP SDK and the most mature MCP SDK are TypeScript; most target agents already require Node; the npm name is free ([ADR-0003](../adr/0003-typescript-on-node.md)) |
-| Agent protocol | `@agentclientprotocol/sdk` | Official SDK, Apache-2.0 |
-| Host protocol | `@modelcontextprotocol/sdk` | Official SDK, MIT |
+| Language | Rust, stable toolchain | One static binary, fast start-up, direct control of processes and signals, crate boundaries that enforce the layering ([ADR-0007](../adr/0007-implement-in-rust.md)) |
+| Async runtime | Tokio | Subprocesses, pipes, timers |
+| Agent protocol | `agent-client-protocol` crate | Official Rust SDK |
+| Host protocol | `rmcp` crate | Official Rust SDK |
 | Storage | Plain files: JSON, NDJSON | Readable by any tool, nothing to install, atomic by rename |
 | Configuration | YAML with a published JSON Schema | Comments, editor completion, validation |
-| Distribution | npm package with a `hufu` binary | Same channel users already use for their agents |
+| Distribution | Prebuilt `hufu` binary per platform; crate `hufu-cli` | No runtime to install; independent of the Node.js versions agents require |
 
 ## 11. How the design grows
 
@@ -347,6 +348,43 @@ Limits that the design cannot remove:
 | **M2** | Generic ACP adapter, pi adapter, worktree isolation, structured output | Second adapter family; no core change |
 | **M3** | Mission engine, tally checker, budgets, usage accounting | New component above the scheduler |
 | **M4** | Daemon, enforced quotas, MCP shell, retries, plug-in adapters | Runner ownership moves into the daemon; store unchanged |
+| **M5** | Capability routing, starting with computer use | Jobs gain parent links and grants; a display slot joins the scheduler ([section 12](#12-capability-routing-planned)) |
 
 Each step leaves the earlier interfaces intact: a script written against the M1 CLI keeps working
 after M4.
+
+## 12. Capability routing (planned)
+
+Roles answer "who plans and who executes". Capabilities answer a different question: **when a task
+needs something beyond code tools, which agent provides it?** The first capability is computer use,
+meaning an agent operating a desktop or browser through its interface. The requirement is that it
+can be served by a separately configured agent or by the executor's own agent
+([ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md), reference study:
+[LCU](../research/computer-use.md)).
+
+```mermaid
+flowchart LR
+    T["Task<br/>grants: computer_use<br/>apps: Figma, Safari"] --> H["Hufu<br/>pre-flight and routing"]
+
+    H -->|"route: executor"| E1["Executor<br/>with its own<br/>computer-use runtime"]
+    E1 --> D[("Desktop")]
+
+    H -->|"route: dedicated"| E2["Executor<br/>(code only)"]
+    E2 -.->|"computer_use tool call"| H
+    H -->|"child job"| OP["Operator profile<br/>any agent with a<br/>computer-use runtime"]
+    OP --> D
+```
+
+| Element | Role |
+|---|---|
+| **Capability declaration** | A profile states that it provides computer use, built in or through an attached runtime such as LCU. Hufu does not bundle or install a runtime |
+| **Route** | `executor` or `dedicated`, from configuration, overridable per task |
+| **Grant and app scope** | The task must grant the capability and name the applications. No permission tier implies it |
+| **Pre-flight** | Hufu checks that the runtime is present and the applications are already allowed, and rejects the task otherwise. It never answers a runtime's approval prompt |
+| **Child job** | In the dedicated route, each hand-over is a job of its own, linked to its parent, with its own record, budget share and result |
+| **Display slot** | One computer-use job per display at a time |
+
+Two properties shape everything else. Computer use cannot be contained by a worktree or a
+permission tier, so a grant is treated as wider than `full-access`. And approval of an application
+belongs to a person, so anything not allowed in advance fails closed.
+

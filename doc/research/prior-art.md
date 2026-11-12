@@ -94,7 +94,7 @@ The metaphor maps onto the product directly:
 |---|---|---|
 | npm | **Free** | `hufu`, `hufu-cli` and the `@hufu` scope all returned 404 on 2026-11-12 |
 | PyPI | Taken | `hufu` 0.5.4, "HuFu (虎符): neuro-symbolic data-quality verification", by another team |
-| crates.io | Taken | `hufu` 0.3.0, "Credential-free, independently verifiable evidence trail for irreversible operations", by another author |
+| crates.io | `hufu` taken; **`hufu-cli` free** | `hufu` 0.3.0, "Credential-free, independently verifiable evidence trail for irreversible operations", by another author. `hufu-cli` returned no result on 2026-11-12 |
 | GitHub | `kverona-ai/hufu` | This repository |
 
 Other candidates considered earlier and rejected because same-field projects already use them:
@@ -102,9 +102,11 @@ Podium, Tutti, Muster, Sortie, Maestro, Conductor, Baton.
 
 **Consequences**
 
-- The npm name being free is one of the reasons for choosing TypeScript
-  ([ADR-0003](../adr/0003-typescript-on-node.md)). The name should be reserved on npm before the
-  first public release.
+- Hufu is written in Rust ([ADR-0007](../adr/0007-implement-in-rust.md)). Because `hufu` is taken
+  on crates.io, the crate is published as **`hufu-cli`** and installs a command named `hufu`. This
+  was confirmed by the project owner.
+- The free npm name `hufu` is kept for an optional installer package. Both names should be reserved
+  before the first public release.
 - Two unrelated projects already use the same name and the same tiger-tally story in other
   ecosystems. They are in different fields (data quality, audit evidence), so confusion is unlikely,
   but public descriptions should always say "Hufu, the multi-agent dispatch layer".

@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-d9931f"></a>
   <a href="doc/roadmap.md"><img alt="Status: design phase" src="https://img.shields.io/badge/status-design%20phase-b3261e"></a>
-  <img alt="Node.js 22.19 or later" src="https://img.shields.io/badge/node-%E2%89%A5%2022.19-3c873a">
+  <a href="doc/adr/0007-implement-in-rust.md"><img alt="Written in Rust" src="https://img.shields.io/badge/built%20with-Rust-b7410e"></a>
   <a href="doc/research/agent-landscape.md"><img alt="Agent Client Protocol v1" src="https://img.shields.io/badge/ACP-v1-4b6bfb"></a>
   <a href="CONTRIBUTING.md"><img alt="Feedback welcome" src="https://img.shields.io/badge/feedback-welcome-8f8779"></a>
 </p>
@@ -92,6 +92,8 @@ flowchart LR
 | ✅ **Tally check** | Exit code `0` is not success. Acceptance checks decide whether work is accepted |
 | 🌐 **Open-API models** | Any model on OpenRouter, DeepSeek, Z.ai or Kimi's coding plan becomes an agent through the pi harness |
 | 🔌 **ACP first** | A new Agent Client Protocol agent is added with a few lines of configuration |
+| 🦀 **One binary** | Written in Rust. A single self-contained `hufu` command with no runtime to install |
+| 🖥️ **Computer use, routed** *(planned)* | A task can use the desktop through a dedicated operator agent or through the executor's own agent, chosen in configuration and always behind an explicit grant |
 
 ## A quick look
 
@@ -159,10 +161,11 @@ What each agent supports, and how sure we are of it, is recorded in the
 | Milestone | Theme | Status |
 |---|---|---|
 | **M0** | Foundation: requirements, research, architecture, repository layout | 🟡 In progress |
-| **M1** | First dispatch: core, CLI, Codex and Antigravity adapters, Claude Code skill | ⚪ Planned |
+| **M1** | First dispatch: core, CLI, Codex **and** Antigravity adapters, Claude Code skill | ⚪ Planned |
 | **M2** | Many agents: generic ACP adapter, pi, git worktree isolation | ⚪ Planned |
 | **M3** | Pluggable commander: missions, tally checks, budgets | ⚪ Planned |
 | **M4** | Always on: daemon, quotas, MCP server | ⚪ Planned |
+| **M5** | Beyond the workspace: computer-use routing | ⚪ Planned |
 
 Details: [doc/roadmap.md](doc/roadmap.md).
 
@@ -173,8 +176,9 @@ Details: [doc/roadmap.md](doc/roadmap.md).
 | [Requirements](doc/requirements/requirements.md) | Goals, users, scenarios, functional and non-functional requirements |
 | [Agent landscape](doc/research/agent-landscape.md) | How each agent can be driven headlessly; the Agent Client Protocol |
 | [Prior art and naming](doc/research/prior-art.md) | Existing orchestrators and where Hufu differs |
+| [Computer use study](doc/research/computer-use.md) | What Hufu learns from LCU for routing computer use |
 | [Architecture](doc/architecture/architecture.md) | Components, roles, job and mission lifecycles, security model |
-| [Technical design](doc/technical/technical-design.md) | Stack, configuration, task spec, CLI, job store, missions, testing |
+| [Technical design](doc/technical/technical-design.md) | Rust stack and crate layout, configuration, task spec, CLI, job store, missions, testing |
 | [Adapter contract](doc/technical/adapter-contract.md) | Adapter interface; permission and effort mapping per agent |
 | [Deployment](doc/deployment/deployment.md) | Install, configure, connect hosts, operate |
 | [Cloud environment](doc/deployment/cloud-environment.md) | What cloud development sessions need |
@@ -192,7 +196,7 @@ hufu/
 ├── LICENSE              Apache-2.0
 ├── doc/                 every document: requirements, research, architecture,
 │                        technical design, deployment, decision records, examples
-└── src/                 every line of code, with its manifest and tests (from M1)
+└── src/                 every line of code: a Cargo workspace with its tests (from M1)
 ```
 
 ## The name

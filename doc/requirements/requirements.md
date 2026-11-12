@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for review |
-| **Last updated** | 2026-11-12 |
+| **Last updated** | 2026-11-12 (Rust, both first adapters, capability routing) |
 | **Related** | [Research](../research/agent-landscape.md), [Architecture](../architecture/architecture.md), [Roadmap](../roadmap.md) |
 
 ## 1. Background
@@ -81,6 +81,8 @@ against the spec.
 | **Tally check** | The acceptance step that compares a job's result with the task's acceptance criteria |
 | **Permission tier** | Hufu's uniform permission level: `read-only`, `workspace-write` or `full-access` |
 | **Effort** | Hufu's uniform reasoning level: `off`, `low`, `medium`, `high`, `max`, or `default` |
+| **Capability** | Something a profile can do beyond code tools. The first is **computer use**: operating a desktop or browser through its interface |
+| **Grant** | A task's explicit permission to use a capability, with a scope such as a list of applications |
 
 ## 6. Scenarios
 
@@ -109,6 +111,12 @@ to the configuration naming its launch command, runs `hufu doctor`, and uses it.
 
 **S7. Unattended run.** A nightly script runs `hufu run --wait --json` with a timeout and uses the
 exit code to decide whether to open a pull request.
+
+**S8. One step on the desktop (planned).** A coding task needs to check a rendered page in a
+browser. The task grants computer use for that browser. Configuration says computer use goes to a
+dedicated operator profile, so when the executor asks for it, Hufu runs the step on the operator as
+a child job and returns the result. With a different configuration, the executor's own agent would
+do the step itself.
 
 ## 7. Functional requirements
 
@@ -205,6 +213,21 @@ Milestones are defined in the [roadmap](../roadmap.md).
 | FR-49 | Token usage and cost per job where the agent reports them, aggregated per mission | P1 | M3 |
 | FR-50 | Summaries sized for an agent's context window: `hufu result` defaults to a compact form and offers the full form on request | P0 | M1 |
 
+### 7.9 Capability routing
+
+Planned for M5. Background in the [computer-use study](../research/computer-use.md) and
+[ADR-0008](../adr/0008-computer-use-is-a-routable-capability.md).
+
+| ID | Requirement | Pri | Milestone |
+|---|---|---|---|
+| FR-51 | A profile can declare capabilities it provides beyond code tools, starting with `computer_use`, and whether it is built in or comes from an attached runtime | P1 | M5 |
+| FR-52 | Routing is configuration: computer use is served either by a **dedicated** profile or by the **executor's own** agent, set globally and overridable per task | P0 | M5 |
+| FR-53 | With a dedicated route, an executor can hand over a computer-use step in the middle of a task. The step runs as a child job, recorded and budgeted under its parent | P0 | M5 |
+| FR-54 | Computer use requires an explicit grant with an application scope. No permission tier implies it. Terminals and the agent's host application are always refused | P0 | M5 |
+| FR-55 | Hufu never answers or bypasses a computer-use runtime's own approval. Applications not already allowed cause the task to be rejected before launch, with instructions | P0 | M5 |
+| FR-56 | At most one computer-use job runs per display at a time | P0 | M5 |
+| FR-57 | `hufu doctor` reports, per profile, whether a computer-use runtime is present and usable on this machine | P1 | M5 |
+
 ## 8. Non-functional requirements
 
 | ID | Area | Requirement |
@@ -216,12 +239,13 @@ Milestones are defined in the [roadmap](../roadmap.md).
 | NFR-05 | Reliability | State changes are atomic on disk. A crash at any point leaves every job in a readable, truthful state |
 | NFR-06 | Reliability | "Exit 0" from an agent is never taken as success on its own |
 | NFR-07 | Portability | macOS and Linux from M1. Windows is a later goal; nothing in the design should rule it out |
-| NFR-08 | Performance | Submitting a job returns in under one second. Hufu's own overhead per running job stays below 50 MB of memory |
+| NFR-08 | Performance | Submitting a job returns in under 200 ms. Hufu's own overhead per running job stays below 20 MB of memory |
 | NFR-09 | Scale | Tens of concurrent jobs and thousands of stored jobs on one machine. Not designed for clusters |
-| NFR-10 | Extensibility | A new CLI adapter is under about 300 lines and passes a shared conformance suite |
+| NFR-10 | Extensibility | A new CLI adapter is one module of a few hundred lines and passes a shared conformance suite |
 | NFR-11 | Compatibility | JSON outputs and the task spec carry a version. Breaking changes bump it |
 | NFR-12 | Usability | Every validation error says what was wrong, which profile or field, and what would be accepted |
 | NFR-13 | Licence | Apache-2.0. Dependencies must be compatible with it |
+| NFR-14 | Distribution | A single self-contained binary per platform. Hufu itself needs no language runtime on the user's machine |
 
 ## 9. Constraints and assumptions
 
@@ -249,9 +273,16 @@ Milestones are defined in the [roadmap](../roadmap.md).
 
 | # | Question | Owner | Needed by |
 |---|---|---|---|
-| Q1 | Is TypeScript on Node.js the right implementation choice? Proposed in [ADR-0003](../adr/0003-typescript-on-node.md) | Project owner | Before M1 |
-| Q2 | Should `agy` be the first adapter, given its non-TTY output bug and the open terms-of-use question? Codex first would be lower risk | Project owner | Before M1 |
 | Q3 | When a permission request falls outside the tier, should Hufu always reject, or may it pause the job and ask the advisor? | Design | M3 |
 | Q4 | Does the advisor review every result, or only those whose automatic checks fail? This trades cost against assurance | Design | M3 |
 | Q5 | Is Windows support wanted before 1.0? | Project owner | M4 |
 | Q6 | How are results delivered to a host that cannot poll, for example through a hook or a notification? | Design | M4 |
+| Q7 | Which adapter surfaces can carry a computer-use runtime headlessly, given that its approvals fail closed? | Research | M5 |
+| Q8 | Is the file-based job store acceptable? Proposed in [ADR-0006](../adr/0006-file-based-job-store.md) | Project owner | Before M1 |
+
+### Resolved
+
+| # | Question | Decision | Date |
+|---|---|---|---|
+| Q1 | Implementation language | **Rust.** The crate is `hufu-cli`, the command is `hufu` ([ADR-0007](../adr/0007-implement-in-rust.md)) | 2026-11-12 |
+| Q2 | Which adapter comes first, `agy` or Codex | **Both ship in the first version** | 2026-11-12 |

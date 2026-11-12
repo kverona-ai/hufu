@@ -1,51 +1,40 @@
 # Source
 
-All of Hufu's code lives in this directory, including its package manifest and tests. Documents
-live in [`doc/`](../doc/README.md).
+All of Hufu's code lives in this directory, including its manifests and tests. Documents live in
+[`doc/`](../doc/README.md).
 
 **There is no code yet.** The project is in its design phase (milestone M0). The first code lands
 with milestone M1; see the [roadmap](../doc/roadmap.md).
 
 ## Planned layout
 
-This directory will be the package root (`package.json` here, published to npm as `hufu`).
+Hufu is written in Rust ([ADR-0007](../doc/adr/0007-implement-in-rust.md)). This directory will be
+a Cargo workspace. The published crate is `hufu-cli`; the command it installs is `hufu`.
 
 ```text
 src/
-├── package.json
-├── tsconfig.json
-├── cli/                    command definitions, output, exit codes
-├── core/
-│   ├── spec/               task spec, config and result schemas; validation
-│   ├── registry/           profiles, adapter lookup, capability cache
-│   ├── store/              job and mission directories, atomic writes
-│   ├── runner/             detached per-job runner
-│   ├── scheduler/          queue, concurrency slots, dependency release
-│   ├── workspace/          working directories, git worktrees, change detection
-│   ├── tally/              acceptance checks
-│   └── mission/            advisor loop, plans, verdicts, budgets
-├── adapters/
-│   ├── contract.ts         the Adapter interface
-│   ├── acp/                generic Agent Client Protocol adapter
-│   ├── codex-cli/
-│   ├── agy-cli/
-│   ├── cursor-cli/
-│   ├── kimi-cli/
-│   ├── pi/
-│   └── claude-cli/
-├── mcp/                    MCP shell (M4)
-├── daemon/                 daemon (M4)
-├── integrations/
-│   └── claude-code/        skill and CLAUDE.md snippet
-└── testing/                fake agents, recorded transcripts, conformance suite
+├── Cargo.toml              workspace manifest
+├── Cargo.lock
+├── rust-toolchain.toml
+├── crates/
+│   ├── hufu-cli/           the `hufu` binary: commands, output, exit codes
+│   ├── hufu-core/          spec, registry, store, runner, scheduler, workspace, tally, mission
+│   ├── hufu-contract/      the Adapter trait and the types shared with adapters
+│   ├── hufu-adapters/      acp, codex_cli, agy_cli, cursor_cli, kimi_cli, pi, claude_cli
+│   ├── hufu-mcp/           MCP shell (M4)
+│   ├── hufu-daemon/        daemon (M4)
+│   └── hufu-testing/       fake agents, recorded transcripts, conformance suite
+└── integrations/
+    └── claude-code/        skill and CLAUDE.md snippet
 ```
 
 ## Rules for this directory
 
-- `cli`, `mcp` and `daemon` depend on `core`. `core` depends only on `adapters/contract.ts`.
-  Concrete adapters depend on the contract and on nothing in `core`.
+- `hufu-core` and `hufu-adapters` each depend on `hufu-contract` and not on each other. The
+  binaries depend on `hufu-core` and wire the adapters in. The crate graph enforces this.
 - Every adapter passes the shared conformance suite before it is merged.
 - No test in the default suite needs a real agent, a login or the network.
+- `cargo fmt` and `cargo clippy` are clean on every commit.
 
 Design references: [technical design](../doc/technical/technical-design.md),
 [adapter contract](../doc/technical/adapter-contract.md).

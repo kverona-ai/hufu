@@ -1,8 +1,8 @@
-# Dependencies and build output
-node_modules/
+# Build output
+target/
 dist/
-*.tsbuildinfo
 coverage/
+node_modules/
 
 # Local Hufu state inside a project (the project config is committed, job data is not)
 .hufu/*
@@ -22,5 +22,3 @@ coverage/
 
 # Logs
 *.log
-npm-debug.log*
-pnpm-debug.log*
