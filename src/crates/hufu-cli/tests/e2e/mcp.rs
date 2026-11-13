@@ -290,6 +290,31 @@ fn an_agent_can_configure_hufu() {
     assert_eq!(result["final_message"], format!("CODEX_HOME={home_a}"));
     assert_eq!(result["agent"]["model"], "gpt-big");
 
+    // A model and an effort for one job override the profile; a dry run shows what would be passed.
+    let plan = host.call(
+        "hufu_submit",
+        json!({"agent": "codex-work", "prompt": "x", "model": "gpt-small", "effort": "high", "dry_run": true}),
+    );
+    let args = strings(&plan["launch"]["args"]);
+    assert_eq!((plan["profile"].as_str(), plan["effort"].as_str()), (Some("codex-work"), Some("high")));
+    assert!(args.windows(2).any(|w| w == ["-m", "gpt-small"]), "{args:?}");
+    assert!(args.iter().any(|a| a == "model_reasoning_effort=\"high\""), "{args:?}");
+    // The default effort, and a profile that takes the nearest level instead of refusing.
+    host.call("hufu_config_set", json!({"key": "defaults.effort", "value": "medium"}));
+    assert_eq!(
+        host.call("hufu_submit", json!({"agent": "codex-home", "prompt": "x", "dry_run": true}))["effort"],
+        "medium"
+    );
+    assert!(host.call_err("hufu_submit", json!({"agent": "agy", "prompt": "x", "effort": "max"})).contains("nearest"));
+    host.call(
+        "hufu_profile_set",
+        json!({"name": "agy", "profile": {"adapter": "agy-cli", "effort_fallback": "nearest"}}),
+    );
+    let near = host.call("hufu_submit", json!({"agent": "agy", "prompt": "x", "effort": "max", "dry_run": true}));
+    assert_eq!(near["effort"], "high");
+    assert!(strings(&near["warnings"]).iter().any(|w| w.contains("nearest level `high`")), "{near}");
+    host.call("hufu_config_set", json!({"key": "defaults.effort", "value": null}));
+
     // Invalid changes are refused and leave the file as it was.
     let before = std::fs::read_to_string(env.home.join("config.yaml")).unwrap();
     assert!(host.call_err("hufu_config_set", json!({"key": "roles.advisor", "value": "nobody"})).contains("nobody"));

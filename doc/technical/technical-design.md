@@ -136,9 +136,17 @@ hand-written file are not preserved by an edit.
 - A **pool** has `members` (profiles) and a `strategy`. Wherever a task names an agent, it may name
   a pool. At submission Hufu orders the members by strategy: `failover` keeps the listed order,
   `round-robin` rotates the starting point (a counter in `run/rr-<pool>`), `least-busy` sorts by
-  running jobs. The runner then tries them in that order and moves to the next member only when
-  one fails with `agent_unavailable`, `auth_required` or `rate_limited`. The profile that actually
-  ran is recorded in the state and the result.
+  running jobs. Each member is then checked against the task (`submit::fit`): one that cannot
+  enforce the tier or map the effort level, or that would run at a different tier than the first
+  usable member, is left out with a warning, and a task no member can take is refused. The first
+  member left is the job's profile and the others are its alternates, each with its own resolved
+  model and effort; a model or effort named on the task applies to all of them. The runner tries
+  them in that order and moves to the next member only when one fails with `agent_unavailable`,
+  `auth_required` or `rate_limited`. The profile that actually ran is recorded in the state and
+  the result.
+- Nothing balances work across different executors. A task names one profile or pool: the caller
+  picks it (`hufu run -a`, `hufu_submit`), or, in a mission, the advisor does in its plan
+  (section 9). Concurrency limits (`limits`) make a job wait for a slot; they never move it.
 - `roles.advisor` is one profile. `roles.executors` is a list of profiles and pools; its first
   entry is the default agent of `hufu run`.
 
@@ -361,8 +369,10 @@ for JSON.
 ### 9.1 What the advisor is given
 
 - The goal, in the user's words.
-- The **roster**: each executor profile's name, a one-line description from configuration, and its
-  capabilities (tiers, effort levels, whether it can resume).
+- The **roster**: each executor's name, a one-line description from configuration, its
+  capabilities (tiers, effort levels, whether it can resume, whether it can operate the desktop),
+  and its model and account where the profile names them. A pool is listed with its members and
+  the details of its first member.
 - The plan schema and the rules: use only roster profiles, request the lowest tier that works,
   give every write task an acceptance check.
 

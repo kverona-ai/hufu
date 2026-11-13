@@ -158,10 +158,10 @@ flowchart LR
 |---|---|
 | 🐯 **可插拔的指挥者** | advisor 和执行者是配置里的角色，不是写死的代码。同一个 Agent 这次做规划，下次可以去执行 |
 | 📜 **统一的任务规格** | 同一份 YAML 可以驱动 Codex、Antigravity、Cursor、Kimi Code、Claude Code、pi 和任何 ACP Agent |
-| 👥 **多个执行者，多个账号** | 可以配置任意多个 profile，包括同一个 Agent 的多个账号。账号池可以故障切换或轮流使用 |
+| 👥 **多个执行者，多个账号** | 可以配置任意多个 profile，包括同一个 Agent 的多个账号。账号池可以故障切换或轮流使用。见[任务派给谁](#任务派给谁) |
 | 💾 **作业不随会话消失** | 状态、日志和结果都在磁盘上。会话丢了，工作还在 |
 | 🔒 **显式的权限** | 三个档位：`read-only`、`workspace-write`、`full-access`，按 Agent 逐一翻译。Agent 做不到的档位直接拒绝，绝不悄悄放宽；只读作业如果改了文件，直接判失败 |
-| 🎚️ **统一的思考强度** | 一套刻度映射到各 Agent 自己的控制方式；映射不了就报错，而不是悄悄忽略 |
+| 🎚️ **按任务指定模型和思考强度** | 模型和思考强度可以按任务、按 profile 指定，也可以设全局默认。思考强度用一套刻度映射到各 Agent 自己的控制方式；映射不了就报错，而不是悄悄忽略。见[怎样设置](#指定模型和思考强度) |
 | ✅ **合符检查** | 退出码为 `0` 不等于成功。工作是否被接受由验收条件决定 |
 | 🔌 **MCP 接入，ACP 接出** | 任何支持 MCP 的 Agent 都能驱动虎符，甚至替你配置虎符。任何支持 ACP 的 Agent 写几行配置就能被驱动 |
 | 🖥️ **可路由的 computer use** | 任务可以被授予操作桌面应用的权限。具体由谁来操作可以配置：单独的操作者 profile，或任何支持 computer use 的执行者。必须有显式授权 |
@@ -248,8 +248,182 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 工具：派发和跟踪作业、运行 mission，以及读取和修改虎符的配置，包括添加 profile 和账号池。
 "把我的第二个 Codex 账号加进虎符，和现有的组成一个池"这样的话，可以直接对其中任何一个 Agent 说。
 
+接下来的两节讲在 Agent 里最常被问到的两件事：怎样[指定执行者的模型和思考强度](#指定模型和思考强度)，
+以及[任务到底派给哪个执行者](#任务派给谁)。
+
 整个安装过程也可以交给 Agent 来做，这是[首选的安装方式](#让你的-agent-来安装)，它照着做的步骤写在
 [Agent 安装指南](doc/guide/agent-install.md)里。
+
+## 指定模型和思考强度
+
+每个执行者运行时都有一个模型和一档思考强度（effort）。两者都可以在三个地方设置，前面的优先：
+
+| | 在哪里设置 | 作用范围 |
+|---|---|---|
+| 1 | **任务**：`hufu_submit` 的 `model` 和 `effort`（命令行是 `hufu run` 的 `-m` 和 `-e`，任务文件里是 `model:` 和 `effort:`） | 只对这一个作业 |
+| 2 | **profile**：它的 `model` 和 `effort` | 这个 profile 的每一个作业 |
+| 3 | 配置里的 **`defaults.effort`**（只有思考强度） | 其余所有情况 |
+
+三处都没写时，用 Agent 自己默认的模型和思考强度。
+
+### 在 Agent 里调用
+
+这是最常用的方式。对任何已接入虎符的 Agent（Claude Code、Codex、Cursor 等）直接说你想要什么，
+它会替你发起工具调用。
+
+**只针对一个任务。**
+
+> 让 Codex 检查 src/auth 里有没有竞态问题，用 gpt-6.1-sol，思考强度 high。
+
+```jsonc
+// hufu_submit
+{
+  "agent": "codex",
+  "prompt": "检查 src/auth 里的竞态问题，逐条给出文件和行号。",
+  "model": "gpt-6.1-sol",
+  "effort": "high"
+}
+```
+
+**针对某个执行者的所有任务。** 给这个组合起个名字，存成一个 profile。它的描述（description）
+之后会被你的 Agent 或 mission 的 advisor 读到，用来决定任务派给谁：
+
+> 在虎符里加一个 profile，叫 codex-deep：Codex 配 gpt-6.1-sol，思考强度 max，用来做困难的
+> 设计和排错工作。
+
+```jsonc
+// hufu_profile_set
+{
+  "name": "codex-deep",
+  "profile": {
+    "adapter": "codex-cli",
+    "model": "gpt-6.1-sol",
+    "effort": "max",
+    "description": "困难的设计和排错工作"
+  }
+}
+```
+
+**作为全局默认。**
+
+> 把虎符的默认思考强度设成 medium。
+
+```jsonc
+// hufu_config_set
+{ "key": "defaults.effort", "value": "medium" }
+```
+
+想在真正运行之前看看会传什么参数，可以让它先试运行（"先把命令给我看看"）：带上
+`"dry_run": true` 的 `hufu_submit` 会返回完整的命令行，但不启动任何东西。作业结束后，
+`hufu_result` 里的 `agent` 一栏会写明实际使用的 profile、模型和思考强度。
+
+### 思考强度的刻度
+
+所有 Agent 共用一套刻度：`off`、`low`、`medium`、`high`、`max`。`default` 表示什么都不传，交给
+Agent 自己决定；`native:<值>` 表示把 Agent 自己的原生取值原样传过去，例如 Codex 的
+`native:xhigh`。
+
+| Agent | 它有哪些档 | `high` 时虎符传什么 | 模型 |
+|---|---|---|---|
+| Codex | `low` 到 `max` | `-c model_reasoning_effort="high"` | `-m <id>` |
+| Claude Code | `low` 到 `max` | `--effort high` | `--model <id>` |
+| Antigravity | `low` 到 `high` | `--effort high` | `--model <id>` |
+| Kimi Code | `low` 到 `max` | 环境变量 `KIMI_MODEL_THINKING_EFFORT=high` | `-m <id>` |
+| pi | `off` 到 `max` | `--thinking high` | `--model <id>` |
+| Cursor | 没有 | 不传；思考强度通过模型 id 来选 | `--model <id>` |
+| ACP Agent | 会话建立时 Agent 自己公布的那些 | 一个会话选项 | 一个会话选项 |
+
+两条规则：
+
+- **Agent 没有的档位会报错**，而且是在启动任何东西之前。在 profile 上设置
+  `effort_fallback: nearest` 后，虎符会改用该 Agent 最接近的一档，并在作业的警告里写明。
+  `defaults.effort` 要宽松一些：遇到没有这一档的 Agent，就用 Agent 自己的默认值，并给出警告。
+- **模型 id 原样传给 Agent。** 虎符不维护模型列表，这个 id 存不存在由 Agent 自己判断。
+
+### 在命令行里
+
+```console
+$ hufu run -a codex -m gpt-6.1-sol -e high "检查 src/auth 里有没有竞态问题"
+$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.1-sol --effort max \
+    --description "困难的设计和排错工作"
+$ hufu profile set agy --effort-fallback nearest
+$ hufu config set defaults.effort medium
+$ hufu run -a codex -m gpt-6.1-sol -e high --dry-run "x"    # 只打印命令行，不启动
+```
+
+## 任务派给谁
+
+配置了多个执行者时，虎符不会自己把任务摊给它们。**每个任务都要点名一个 profile 或一个账号池**，
+这个名字由谁来写，取决于谁在指挥：
+
+| 谁在指挥 | 谁来选执行者 | 怎么选 |
+|---|---|---|
+| 你的 Agent，一个任务一个任务地派（`hufu_submit`） | 你的 Agent | 它先读 `hufu_agents`（每个 profile 能做什么、用什么模型、描述是什么），再在 `agent` 里写上一个 profile 或账号池的名字 |
+| 一个 mission（`hufu_mission_start`） | advisor | 它拿到执行者名单，写出一份计划，计划里每个任务都点名其中一个。虎符检查这份计划，然后执行 |
+| 上面两种情况里，点的名字是**账号池** | 虎符 | 按这个池的策略挑出一个成员 |
+
+`hufu run` 不带 `-a` 时，任务交给 `roles.executors` 里的第一个。`hufu_submit` 必须写明 agent。
+
+**逐个任务派发。** 你通过自己的 Agent 来指挥：
+
+> 让 Codex 在 worktree 里修好失败的 auth 测试，同时让 Antigravity 更新 API 文档。两个都完成后
+> 告诉我。
+
+你的 Agent 会发起两次 `hufu_submit`，一次是 `"agent": "codex"`，一次是 `"agent": "agy"`，都带上
+`"permission": "workspace-write"` 和 `"isolation": "worktree"`，然后用一次 `hufu_wait` 等两个作业。
+
+**账号池：可以互相替代的执行者。** 账号池用来放可以互相顶替的 profile，典型情况是同一个 Agent
+的多个账号。
+
+> 把我的两个 Codex 账号组成一个池，轮流使用。
+
+```jsonc
+// hufu_pool_set
+{ "name": "codex-any", "members": ["codex", "codex-work"], "strategy": "round-robin" }
+```
+
+- 提交时虎符先给成员排序：`failover` 保持配置里的顺序，`round-robin` 每来一个作业就从下一个
+  成员开始，`least-busy` 把正在运行的作业最少的成员排在最前。
+- 按任务的要求接不了这个任务的成员（它没有这个权限档位或这档思考强度）会被排除，并给出警告。
+  剩下的第一个成员运行作业。
+- 只有当正在运行的成员没有安装、没有登录或者被限流时，作业才会换到下一个成员。Agent 把活干错了，
+  不会换一个账号重做。
+- 任务上写明的 `model` 或 `effort` 会跟着作业走，不管最后是哪个成员运行。没写的话，每个成员用
+  自己的设置。
+
+**mission：由 advisor 分配。**
+
+> 启动一个虎符 mission：把 HTTP 客户端迁移到 async/await，保持测试通过。由 Claude 规划和审查，
+> codex-deep、codex-any 和 agy 干活。
+
+```jsonc
+// hufu_mission_start
+{
+  "goal": "把 HTTP 客户端从回调风格迁移到 async/await，保持测试通过",
+  "advisor": "claude",
+  "executors": ["codex-deep", "codex-any", "agy"]
+}
+```
+
+- 名单就是 `executors`；不写时用 `roles.executors`。对名单里的每一项，advisor 能看到它的描述、
+  权限档位、思考强度档位、模型和账号。名单之外的它看不到。
+- 计划里的每个任务点名名单中的一项，还可以指定权限档位和思考强度。它不能指定模型：想让 advisor
+  在几个模型之间选，就把每个模型各做成一个 profile（像上面的 `codex-deep`），并在描述里写清楚它
+  擅长什么。
+- 虎符用和 `hufu run` 相同的规则校验计划。如果计划点了名单之外的 Agent，或者要求了所选 Agent
+  做不到的事，计划会退回给 advisor 改一次；第二次还不合格，mission 就失败。
+- 任务按计划里的顺序启动，前提是它依赖的任务都已被接受；同时运行的任务数不超过
+  `missions.max_parallel`（默认 1）。
+- advisor 要求返工的任务会回到同一个执行者手里；如果这个 Agent 支持恢复会话，就在原来的会话里
+  继续。一个任务失败后，依赖它的任务会被跳过。
+
+**并发限制在任何情况下都生效。** 同时运行的作业不超过 `limits.max_concurrent_jobs`（默认 4），
+`limits.per_profile.<name>` 限制单个 profile。超出限制的作业处于 `queued` 状态等待，不会被转给
+别的执行者。
+
+更多细节见用户指南：[账号池](doc/guide/user-guide.md#pools)、
+[模型和思考强度](doc/guide/user-guide.md#model-and-effort)、
+[mission](doc/guide/user-guide.md#7-missions)。
 
 ## 路线图
 

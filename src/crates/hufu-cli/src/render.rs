@@ -1,7 +1,7 @@
 //! Plain-text rendering for people. Machines use `--json`.
 
 use hufu_contract::time::fmt_duration;
-use hufu_contract::{effort_list, tier_list};
+use hufu_contract::{Effort, effort_list, tier_list};
 use hufu_core::doctor::{DoctorReport, SelfTest};
 use hufu_core::error::exit;
 use hufu_core::mission::Mission;
@@ -132,6 +132,12 @@ pub fn result(r: &JobResult, max_chars: Option<usize>) {
     )];
     if let Some(account) = &r.agent.account {
         facts.push(format!("account {account}"));
+    }
+    if let Some(model) = &r.agent.model {
+        facts.push(format!("model {model}"));
+    }
+    if r.agent.effort != Effort::Default {
+        facts.push(format!("effort {}", r.agent.effort));
     }
     if let Some(tier) = r.agent.permission {
         facts.push(format!("permission {tier}"));

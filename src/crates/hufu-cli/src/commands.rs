@@ -1293,6 +1293,12 @@ fn profile_body(a: &ProfileArgs) -> Result<Value> {
         Effort::parse(e).map_err(HufuError::usage)?;
         put("effort", Some(json!(e)));
     }
+    if let Some(f) = &a.effort_fallback {
+        if !["error", "nearest"].contains(&f.as_str()) {
+            return Err(HufuError::usage(format!("unknown effort fallback `{f}`; accepted: error, nearest")));
+        }
+        put("effort_fallback", Some(json!(f)));
+    }
     if let Some(p) = &a.permission {
         put("permission", Some(json!(Tier::parse(p).map_err(HufuError::usage)?)));
     }

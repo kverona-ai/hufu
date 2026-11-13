@@ -418,13 +418,18 @@ pub struct ProfileArgs {
     /// codex-cli, agy-cli, cursor-cli, claude-cli, kimi-cli, pi, acp or external.
     #[arg(long)]
     pub adapter: Option<String>,
+    /// The default model of this profile, passed to the agent as it is.
     #[arg(long)]
     pub model: Option<String>,
     /// pi only: the model provider.
     #[arg(long)]
     pub provider: Option<String>,
+    /// The default effort of this profile: default, off, low, medium, high, max or native:<value>.
     #[arg(long)]
     pub effort: Option<String>,
+    /// What to do with an effort level this agent does not have: error (the default) or nearest.
+    #[arg(long = "effort-fallback")]
+    pub effort_fallback: Option<String>,
     #[arg(long)]
     pub permission: Option<String>,
     /// Needed together with --permission full-access.
