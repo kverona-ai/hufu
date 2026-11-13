@@ -16,7 +16,7 @@ use hufu_core::ops::{self, PruneOptions};
 use hufu_core::spec::{Check, ComputerUseOverride, OutputSpec, PathRules, SchemaRef, TaskSpec};
 use hufu_core::store::{self, JobState, State};
 use hufu_core::submit::{self, Context, Options};
-use hufu_core::{capability, doctor, runner, setup};
+use hufu_core::{capability, doctor, runner, setup, update};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -120,12 +120,23 @@ pub fn run(args: Cli) -> Result<i32> {
         Command::Init(a) => cmd_init(&app, a.force),
         Command::Up(a) => cmd_up(&app, a),
         Command::Setup(a) => cmd_setup(&app, a),
+        Command::Update(a) => cmd_update(&app, a),
         Command::Config(c) => cmd_config(&app, c),
         Command::Profile(c) => cmd_profile(&app, c),
         Command::Pool(c) => cmd_pool(&app, c),
         Command::Runner { job } => {
             let state = runner::run_job(&app.home, &app.adapters, &job)?;
             Ok(render::exit_code(state.state, state.verdict, state.reason.as_deref()))
+        }
+        Command::Sweep { exe } => {
+            // The updater that moved the old program aside is still running from it for a moment.
+            for _ in 0..40 {
+                if update::sweep_old(&exe) == 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Ok(exit::OK)
         }
         Command::MissionDriver { mission } => {
             let m = mission::load(&app.home, &mission)?;
@@ -768,6 +779,242 @@ fn cmd_mission(app: &App, c: MissionCommand) -> Result<i32> {
             Ok(exit::OK)
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Updating Hufu itself
+// ---------------------------------------------------------------------------------------------
+
+/// What to do about a release that was found.
+#[derive(Clone, Copy, PartialEq)]
+enum Choice {
+    Install,
+    UpToDate,
+    /// The installed program is newer than the newest release (a build from source).
+    Ahead,
+}
+
+fn choose(current: &str, release: &update::Release, asked_for: bool, force: bool) -> Choice {
+    use std::cmp::Ordering;
+    use update::Version;
+    let order = match (Version::parse(&release.version), Version::parse(current)) {
+        (Some(new), Some(old)) => new.cmp(&old),
+        _ if release.version == current => Ordering::Equal,
+        _ => Ordering::Greater,
+    };
+    match order {
+        _ if force => Choice::Install,
+        Ordering::Equal => Choice::UpToDate,
+        Ordering::Greater => Choice::Install,
+        // Going back to an older release is fine when it was asked for by name.
+        Ordering::Less if asked_for => Choice::Install,
+        Ordering::Less => Choice::Ahead,
+    }
+}
+
+fn cmd_update(app: &App, a: UpdateArgs) -> Result<i32> {
+    let exe = update::installed_exe()?;
+    let source = update::Source::from_env();
+    let scratch = update::Scratch::new()?;
+    let note = |text: &str| {
+        if !app.json {
+            eprintln!("{text}");
+        }
+    };
+    // A wrong `--version` is a usage error, whatever else was asked for.
+    let wanted_tag = a.version.as_deref().map(update::tag_for).transpose()?;
+    let release =
+        if a.from_source { None } else { update::find_release(&source, a.version.as_deref(), scratch.path())? };
+
+    if a.check {
+        let doc = match &release {
+            Some(r) => {
+                let v = choose(VERSION, r, a.version.is_some(), false);
+                json!({
+                    "action": "check", "current": VERSION, "latest": r.version, "tag": r.tag, "release_found": true,
+                    "update_available": v == Choice::Install, "binary": r.asset.is_some(), "source": source.describe(), "exe": exe,
+                })
+            }
+            None => json!({
+                "action": "check", "current": VERSION, "latest": null, "tag": wanted_tag, "release_found": false,
+                "update_available": false, "binary": false, "source": source.describe(), "exe": exe,
+            }),
+        };
+        app.out(&doc, || {
+            println!("installed: hufu {VERSION} ({})", exe.display());
+            match &release {
+                Some(r) => {
+                    let what = if a.version.is_some() { "release" } else { "latest release" };
+                    println!("{what}: {} ({})", r.version, r.tag);
+                    match choose(VERSION, r, a.version.is_some(), false) {
+                        Choice::Install if r.asset.is_some() => match &a.version {
+                            Some(v) => println!("that is not the installed version: `hufu update --version {v}` installs it"),
+                            None => println!("an update is available: run `hufu update`"),
+                        },
+                        Choice::Install => println!(
+                            "an update is available, but without a binary for this platform: `hufu update` would build it from source"
+                        ),
+                        Choice::UpToDate => println!("up to date"),
+                        Choice::Ahead => println!("the installed program is newer than the latest release; nothing to do"),
+                    }
+                }
+                None => match &wanted_tag {
+                    Some(tag) => println!("there is no release {tag} at {}", source.describe()),
+                    None => println!(
+                        "no release is published at {}; `hufu update` would rebuild from the main branch with cargo",
+                        source.describe()
+                    ),
+                },
+            }
+        });
+        return Ok(exit::OK);
+    }
+
+    // Decide where the new program comes from, or that there is nothing to do.
+    let mut build_tag: Option<Option<String>> = None;
+    match &release {
+        _ if a.from_source => build_tag = Some(wanted_tag.clone()),
+        Some(r) => {
+            let v = choose(VERSION, r, a.version.is_some(), a.force);
+            if v != Choice::Install {
+                let reason = if v == Choice::Ahead { "newer_than_latest" } else { "up_to_date" };
+                let doc = json!({"action": "update", "updated": false, "reason": reason, "current": VERSION, "latest": r.version, "tag": r.tag, "exe": exe});
+                app.out(&doc, || match v {
+                    Choice::Ahead => println!(
+                        "hufu {VERSION} is newer than the latest release ({}); nothing to do. `hufu update --version {}` installs that release",
+                        r.version, r.tag
+                    ),
+                    _ => println!("hufu {VERSION} is up to date. `hufu update --force` installs it again"),
+                });
+                return Ok(exit::OK);
+            }
+            if r.asset.is_none() {
+                note(&format!(
+                    "Release {} has no binary for this platform ({} {}); building it from source.",
+                    r.tag,
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ));
+                build_tag = Some(Some(r.tag.clone()));
+            }
+        }
+        None => match &wanted_tag {
+            Some(tag) => {
+                return Err(HufuError::usage(format!(
+                    "there is no release {tag} at {}. To build that tag from source, add --from-source",
+                    source.describe()
+                )));
+            }
+            None => {
+                note(&format!(
+                    "No release is published at {}; building the main branch from source.",
+                    source.describe()
+                ));
+                build_tag = Some(None);
+            }
+        },
+    }
+
+    update::check_writable(&exe)?;
+    let (new, method) = match (&build_tag, &release) {
+        (Some(tag), _) => {
+            note("Building Hufu with cargo (this takes a minute)...");
+            (update::build_from_source(tag.as_deref(), scratch.path(), app.json)?, "source")
+        }
+        (None, Some(r)) => {
+            note(&format!("Downloading Hufu {} ...", r.version));
+            (update::download(r, scratch.path())?, "release")
+        }
+        (None, None) => return Err(HufuError::internal("no release and no build to install")),
+    };
+    // The new program must start here, and must be what the release says it is.
+    let version = update::probe_version(&new)?;
+    if let (None, Some(r)) = (&build_tag, &release)
+        && version != r.version
+    {
+        return Err(HufuError::internal(format!(
+            "release {} holds a program that reports version {version}. Nothing was changed",
+            r.tag
+        )));
+    }
+    let daemon_before = hufu_daemon::status(&app.home);
+    update::install(&new, &exe)?;
+    drop(scratch);
+
+    // From here on the new program is in place: everything else is done by running it.
+    let helper = |args: &[&str]| {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.args(args).env("HUFU_HOME", &app.home.root).current_dir(&app.cwd);
+        cmd
+    };
+    if update::sweep_old(&exe) > 0 {
+        let mut cmd = helper(&["__sweep"]);
+        cmd.arg(&exe)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        hufu_contract::proc::detach(&mut cmd);
+        let _ = cmd.spawn();
+    }
+    let daemon = match &daemon_before {
+        None => json!({"was_running": false, "running": false}),
+        Some(_) => {
+            // If the old daemon cannot be stopped, the report below names the one that runs.
+            let _ = hufu_daemon::stop(&app.home);
+            let started = hufu_contract::proc::run_capture(helper(&["daemon", "start"]), Duration::from_secs(60));
+            match (hufu_daemon::status(&app.home), started) {
+                (Some(info), _) => {
+                    json!({"was_running": true, "running": true, "pid": info.pid, "version": info.version})
+                }
+                (None, Ok(out)) => json!({"was_running": true, "running": false, "error": out.stderr.trim()}),
+                (None, Err(e)) => json!({"was_running": true, "running": false, "error": e.to_string()}),
+            }
+        }
+    };
+    let daemon_failed = daemon["was_running"] == true && daemon["running"] == false;
+
+    if !app.json {
+        println!("updated hufu {VERSION} -> {version} ({})", exe.display());
+        match (daemon["was_running"] == true, daemon_failed) {
+            (false, _) => {}
+            (true, false) => println!("daemon restarted (pid {})", daemon["pid"]),
+            (true, true) => println!(
+                "the daemon was stopped but did not start again: {}. Start it with `hufu daemon start`",
+                daemon["error"].as_str().unwrap_or("unknown reason")
+            ),
+        }
+        println!(
+            "running jobs finish with the version they started with; agents that have Hufu connected use the new one after their next restart"
+        );
+        println!();
+    }
+    // The checks are the new program's own.
+    let (doctor_code, doctor_doc) = if app.json {
+        let out = hufu_contract::proc::run_capture(helper(&["--json", "doctor"]), Duration::from_secs(120))
+            .map_err(|e| HufuError::internal(format!("updated, but `hufu doctor` did not start: {e}")))?;
+        (out.code.unwrap_or(exit::INTERNAL), serde_json::from_str::<Value>(out.stdout.trim()).unwrap_or(Value::Null))
+    } else {
+        let status = helper(&["doctor"])
+            .status()
+            .map_err(|e| HufuError::internal(format!("updated, but `hufu doctor` did not start: {e}")))?;
+        (status.code().unwrap_or(exit::INTERNAL), Value::Null)
+    };
+    let doc = json!({
+        "action": "update", "updated": true, "from": VERSION, "to": version, "method": method, "exe": exe,
+        "daemon": daemon, "doctor_ok": doctor_code == exit::OK, "doctor": doctor_doc,
+    });
+    app.out(&doc, || {
+        if doctor_code != exit::OK {
+            eprintln!("hufu: the update is installed, but `hufu doctor` reports problems (see above)");
+        }
+    });
+    Ok(if doctor_code != exit::OK {
+        doctor_code
+    } else if daemon_failed {
+        exit::INTERNAL
+    } else {
+        exit::OK
+    })
 }
 
 // ---------------------------------------------------------------------------------------------

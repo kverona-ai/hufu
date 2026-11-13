@@ -15,6 +15,8 @@
 #
 # The script downloads one archive from the project's GitHub releases, checks its SHA-256 sum,
 # and copies one file, `hufu`, into the install directory. It changes nothing else.
+#
+# An installed Hufu updates itself: `hufu update`.
 
 set -eu
 
@@ -176,4 +178,5 @@ if [ "$UP" = "1" ]; then
 else
     say ""
     say "Next: run \`hufu up\` to configure Hufu, register it with your agents and start the daemon."
+    say "Later, \`hufu update\` moves to the newest release."
 fi
