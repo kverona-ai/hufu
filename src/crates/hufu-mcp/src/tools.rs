@@ -226,7 +226,7 @@ const TOOLS: &[Tool] = &[
     Tool {
         name: "hufu_init",
         title: "Write a first configuration",
-        description: "Detects the agents installed on this machine and writes a first config.yaml naming them, with a default advisor and executors. An existing file is kept unless `force` is set.",
+        description: "Detects the agents installed on this machine and writes a first config.yaml naming them, with a default advisor and executors. An existing file is kept unless `force` is set. When no agent is installed nothing is written (`action` is `skipped`) unless `force` is set. `hints` says what the user should do next, for example when no agent or only one agent was found.",
         schema: || obj(json!({"force": {"type": "boolean"}}), &[]),
     },
     Tool {

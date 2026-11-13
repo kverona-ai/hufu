@@ -7,7 +7,9 @@
 > server and no account.
 
 To install Hufu for a user, follow the agent install guide. The short version: at least one agent
-program must already be installed and logged in; run
+program must already be installed and logged in (with none, `hufu up` sets nothing up, lists how to
+install one and exits with code 10; with exactly one, that agent is both advisor and only
+executor, and `hufu doctor` says so); run
 `curl -fsSL https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.sh | sh -s -- --up`
 (Windows PowerShell: `$env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.ps1 | iex`);
 check with `hufu --json doctor`; ask the user to restart their agent so that the `hufu_*` MCP tools

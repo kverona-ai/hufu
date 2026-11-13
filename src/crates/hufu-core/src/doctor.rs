@@ -127,10 +127,15 @@ pub fn doctor(home: &Home, loaded: &Loaded, adapters: &dyn AdapterRegistry, vers
             "no configuration file yet: run `hufu init` to write one from the agents found on this machine".into(),
         );
     }
-    if !profiles.iter().any(|p| p.installed) {
-        hints.push("no supported agent is installed. Install at least one (Codex, Antigravity, Cursor, Claude Code, Kimi Code or pi), then run `hufu init`".into());
+    let any_installed = profiles.iter().any(|p| p.installed);
+    let no_roles = config.roles.advisor.is_none() && config.roles.executors.is_empty();
+    if !any_installed {
+        // `hufu init` keeps an existing file, so a file that names no agent needs `--force`.
+        hints.push(setup::no_agent_hint(loaded.global_path.exists() && no_roles));
     }
-    if config.roles.advisor.is_none() {
+    if any_installed && no_roles && loaded.global_path.exists() {
+        hints.push("the configuration names no advisor and no executors although an agent is installed: `hufu init --force` rewrites it from the agents found, or set `roles.advisor` and `roles.executors` with `hufu config set`".into());
+    } else if config.roles.advisor.is_none() {
         hints.push("no default advisor: `hufu config set roles.advisor <profile>` lets `hufu mission start` run without `--advisor`".into());
     }
     for p in profiles.iter().filter(|p| !p.builtin || !p.roles.is_empty()) {
@@ -146,6 +151,19 @@ pub fn doctor(home: &Home, loaded: &Loaded, adapters: &dyn AdapterRegistry, vers
         if !p.missing_env.is_empty() {
             hints.push(format!("profile `{}`: set {} in the shell that runs hufu", p.name, p.missing_env.join(", ")));
         }
+    }
+    // Last, because nothing is broken: one profile that is the advisor and the only executor.
+    if let (Some(advisor), [only]) = (&config.roles.advisor, config.roles.executors.as_slice())
+        && advisor == only
+        && config.profile(advisor).is_some()
+    {
+        let others: Vec<String> = profiles
+            .iter()
+            .filter(|p| p.installed && &p.name != advisor)
+            .filter(|p| !p.builtin || setup::PRESET_ORDER.contains(&p.name.as_str()))
+            .map(|p| p.name.clone())
+            .collect();
+        hints.push(setup::single_agent_hint(advisor, &others));
     }
     DoctorReport {
         version: version.to_string(),

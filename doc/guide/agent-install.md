@@ -113,10 +113,33 @@ nothing that is already in place:
 
 | Step | Same as | Result |
 |---|---|---|
-| Configuration | `hufu init` | `~/.hufu/config.yaml` with one profile per agent found, a default advisor and default executors. An existing file is kept |
+| Configuration | `hufu init` | `~/.hufu/config.yaml` with one profile per agent found, a default advisor and default executors. An existing file is kept. With no agent found, no file is written |
 | Host registration | `hufu setup` | Hufu's MCP server is registered with every agent found on the machine. This edits those agents' own settings; see [section 5](#5-connect-the-host-agents). `hufu up --no-setup` skips it |
 | Daemon | `hufu daemon start` | The optional daemon runs. `hufu up --no-daemon` skips it |
 | Check | `hufu doctor` | A table of agents with installation and login state |
+
+`hufu up` asks no questions. It ends in one of these ways, and `hufu --json up` says the same in
+its `ready` field:
+
+| Last line | Exit code | Meaning |
+|---|---|---|
+| `ready. Try: hufu run -a <profile> ...` | `0` | Set up, and at least one agent can take work |
+| `set up, but not ready: no installed agent is logged in` | `0` | Set up. The user still has to log in; see [section 4](#4-read-the-result) |
+| `hufu: not ready: no supported agent is installed` | `10` | **Nothing was set up.** No configuration was written, nothing was registered and no daemon was started. The output lists the install and login command of every supported agent. Pass that on to the user, and run `hufu up` again once an agent is installed |
+| `not ready: fix the configuration problems above` | `1` | The configuration file has errors; they are listed |
+
+When `hufu up` does not end with exit code `0`, the installer says
+`hufu is installed at ..., but setup is not finished` and ends with the same code on macOS and
+Linux, and with an error on Windows. The program itself is installed; only the setup is open.
+
+**With exactly one agent**, `hufu up` succeeds and the next steps contain
+`only one agent is in use`: that agent is both the advisor and the only executor, so it plans, does
+and reviews the work by itself. Tell the user. Hufu works this way, but it is built to hand work to
+other agents; [section 6](#6-configure) shows how to add a second agent or a second account.
+
+**With no agent that can host Hufu** (for example when only `pi` is installed), `hufu up` prints
+`no agent that could host Hufu was found` and the MCP entry to add by hand; see
+[section 5](#5-connect-the-host-agents).
 
 Installer options. On macOS and Linux they go after `sh -s --`, for example
 `curl ... | sh -s -- --up --dir "$HOME/bin"`. On Windows set the variable before the command.
@@ -166,7 +189,9 @@ How to act on a hint:
 
 | Hint | Action |
 |---|---|
-| `no supported agent is installed` | Stop and ask the user to install one and log in |
+| `no supported agent is installed` | Stop and ask the user to install one and log in. The hint ends with the command to run afterwards: `hufu up`, or `hufu init --force` first when a configuration file that names no agent already exists |
+| `the configuration names no advisor and no executors although an agent is installed` | The file was written before any agent was installed. `hufu init --force` rewrites it from the agents found; ask first if the user edited the file |
+| `only one agent is in use` | Nothing is broken. Tell the user that this agent is both advisor and only executor, and offer to add a second agent or account. The hint names the command |
 | `profile X: the agent is not installed` | It matters only if the user wants that agent. Give them the install command from the hint |
 | `profile X: not logged in` | Ask the user to run the login command from the hint. Do not do it for them |
 | `profile X: set NAME in the shell that runs hufu` | Ask the user to export `NAME` in their shell profile. Do not ask them to paste the value to you |
@@ -381,12 +406,17 @@ configuration and all job records.
 | The cargo build fails on the Rust version | Rust older than 1.89 | `rustup update stable`, then run the installer again |
 | `checksum mismatch` | A damaged or altered download | Stop and tell the user. Do not install the file |
 | `hufu: command not found` | The install directory is not on `PATH` | Use the full path; pass the printed `export PATH=...` line to the user |
+| `hufu up` ends with `not ready: no supported agent is installed`, exit code 10; the installer adds `setup is not finished` | No agent program is on `PATH`. Hufu itself is installed | Ask the user to install and log in to one of the agents listed in the output, then run `hufu up` again. No flag is needed, because nothing was written |
+| `hufu init` says `configuration kept`, but the file names no agent | The file was written with `hufu init --force`, or by an older version, before any agent was installed | `hufu init --force`, then `hufu up` |
+| `only one agent is in use` in the next steps | One agent is both the advisor and the only executor | Not an error. Install a second agent or add a second account, then `hufu config set roles.executors "[<first>, <second>]"` |
+| `no agent that could host Hufu was found` | None of Claude Code, Codex, Cursor, Kimi Code or Antigravity is installed | Add the printed `mcpServers` entry to the agent that should call Hufu, or use the `hufu` command line |
 | `hufu setup` did nothing for an agent | Its program was not found on `PATH` | `hufu setup --agent <name>`, or `--all` |
 | `claude mcp add` failed | Claude Code refused or timed out | Run `hufu setup --agent claude --print` and run the command it shows |
 | A host's file was `skipped` as not plain JSON | The file has comments or is damaged | Add the entry from `hufu setup --agent generic --print` by hand |
 | The `hufu_*` tools do not appear | The host was not restarted | Ask the user to restart it or to open a new session |
 | `daemon not started` | The shell does not let a background process outlive the command | Nothing is lost: the daemon is optional and jobs run without it |
 | Exit 10 from `hufu run` | The agent is not installed, not logged in, or a named variable is not exported | `hufu doctor` says which |
+| Exit 10 from `hufu init` | No agent was found, so no configuration was written | Install an agent, then run it again |
 
 More symptoms are in the [user guide](user-guide.md#15-troubleshooting) and the
 [deployment guide](../deployment/deployment.md#9-troubleshooting).

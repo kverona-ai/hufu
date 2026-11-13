@@ -806,13 +806,14 @@ fn cmd_daemon(app: &App, c: DaemonCommand) -> Result<i32> {
     }
 }
 
-fn print_init(report: &setup::InitReport) {
+fn print_init(report: &setup::InitReport, with_hints: bool) {
     match report.action {
         "kept" => println!("configuration kept: {} (use `hufu init --force` to write a fresh one)", report.path),
+        "skipped" => println!("configuration not written: no supported agent was found on PATH ({})", report.path),
         action => {
             println!("configuration {action}: {}", report.path);
             if report.detected.is_empty() {
-                println!("no supported agent was found on PATH; install one and run `hufu init --force`");
+                println!("no supported agent was found on PATH, so the file names none");
             } else {
                 println!("agents found: {}", report.detected.join(", "));
                 println!(
@@ -823,12 +824,18 @@ fn print_init(report: &setup::InitReport) {
             }
         }
     }
+    if with_hints {
+        for hint in &report.hints {
+            println!("note: {hint}");
+        }
+    }
 }
 
 fn cmd_init(app: &App, force: bool) -> Result<i32> {
     let report = setup::init(&app.home, &app.adapters, force)?;
-    app.out(&report, || print_init(&report));
-    Ok(exit::OK)
+    app.out(&report, || print_init(&report, true));
+    // Nothing was written because there is no agent to name: the caller has a step to do first.
+    Ok(if report.action == "skipped" { exit::AGENT_UNAVAILABLE } else { exit::OK })
 }
 
 fn print_actions(actions: &[setup::SetupAction]) {
@@ -859,37 +866,95 @@ fn cmd_setup(app: &App, a: SetupArgs) -> Result<i32> {
     let actions = setup::setup(&hosts, &opts);
     app.out(&json!({"actions": actions}), || {
         if hosts.is_empty() {
-            println!(
-                "no agent that could host Hufu was found. For any MCP-capable agent, add this server:\n{}",
-                setup::generic_snippet(&opts.exe)
-            );
+            print_no_host(&setup::generic_snippet(&opts.exe));
         }
         print_actions(&actions);
     });
     Ok(if actions.iter().any(|x| x.action == "failed") { exit::INTERNAL } else { exit::OK })
 }
 
+fn print_no_host(snippet: &str) {
+    println!("no agent that could host Hufu was found. For any MCP-capable agent, add this server:\n{snippet}");
+}
+
+/// The profile or pool to suggest for a first job: a default executor if it can run, otherwise
+/// any agent that is installed and not known to be logged out.
+fn first_usable(report: &doctor::DoctorReport) -> Option<String> {
+    let usable = |p: &doctor::ProfileCheck| p.installed && p.authenticated != Some(false) && p.missing_env.is_empty();
+    let by_name = |name: &str| report.profiles.iter().find(|p| p.name == name);
+    report
+        .executors
+        .iter()
+        // A name that is not a profile is a pool; its members are checked when a job is sent.
+        .find(|name| by_name(name).map(usable).unwrap_or(true))
+        .cloned()
+        .or_else(|| report.advisor.clone().filter(|name| by_name(name).map(usable).unwrap_or(false)))
+        .or_else(|| report.profiles.iter().find(|p| usable(p)).map(|p| p.name.clone()))
+}
+
 fn cmd_up(app: &App, a: UpArgs) -> Result<i32> {
     let init = setup::init(&app.home, &app.adapters, false)?;
-    let actions = if a.no_setup {
-        Vec::new()
-    } else {
-        setup::setup(
-            &setup::detect_hosts(),
-            &setup::SetupOptions { remove: false, print: false, project: None, exe: submit::hufu_exe()? },
-        )
-    };
-    let daemon = if a.no_daemon { None } else { Some(hufu_daemon::start(&app.home)) };
     let loaded = app.load()?;
-    let report = doctor::doctor(&app.home, &loaded, &app.adapters, VERSION);
+    let mut report = doctor::doctor(&app.home, &loaded, &app.adapters, VERSION);
+
+    // With no agent there is nothing to dispatch to. Stop here, before other agents' settings are
+    // edited or a daemon is started, and say what is missing instead of reporting success.
+    if !report.profiles.iter().any(|p| p.installed) {
+        let rewrite = init.action == "kept" && report.advisor.is_none() && report.executors.is_empty();
+        let next = setup::after_install(rewrite);
+        let doc = json!({
+            "ready": false,
+            "reason": "no_agent",
+            "next": format!("install and log in to at least one of {}, then {next}", setup::SUPPORTED_AGENTS),
+            "init": init,
+            "setup": [],
+            "daemon": {"running": false, "skipped": true},
+            "doctor": report,
+        });
+        app.out(&doc, || {
+            print_init(&init, false);
+            println!("\nHufu is installed, but it has no agent to dispatch work to, so setup stopped here:");
+            println!("nothing was registered with other agents and the daemon was not started.");
+            println!("\nInstall at least one of these and log in to it:");
+            for name in setup::PRESET_ORDER {
+                if let Some(hint) = report.profiles.iter().find(|p| p.name == *name).and_then(|p| p.hint.as_deref()) {
+                    println!("  {name:<7} {hint}");
+                }
+            }
+            println!("\nThen {next}.");
+            eprintln!("hufu: not ready: no supported agent is installed");
+        });
+        return Ok(exit::AGENT_UNAVAILABLE);
+    }
+
+    let hosts = if a.no_setup { None } else { Some(setup::detect_hosts()) };
+    let actions = match &hosts {
+        None => Vec::new(),
+        Some(hosts) => {
+            let opts = setup::SetupOptions { remove: false, print: false, project: None, exe: submit::hufu_exe()? };
+            // With no host to register with, hand back the entry to add by hand.
+            let generic = ["generic".to_string()];
+            setup::setup(if hosts.is_empty() { &generic } else { hosts }, &opts)
+        }
+    };
+    let no_host = hosts.as_ref().is_some_and(|h| h.is_empty());
+    let daemon = if a.no_daemon { None } else { Some(hufu_daemon::start(&app.home)) };
+    report.daemon = submit::daemon_info(&app.home);
     let daemon_json = match &daemon {
         Some(Ok(info)) => json!({"running": true, "pid": info.pid}),
         Some(Err(e)) => json!({"running": false, "error": e.message}),
         None => json!({"running": false, "skipped": true}),
     };
-    app.out(&json!({"init": init, "setup": actions, "daemon": daemon_json, "doctor": report}), || {
-        print_init(&init);
-        print_actions(&actions);
+    let valid = report.problems.is_empty();
+    let try_with = first_usable(&report);
+    let ready = valid && try_with.is_some();
+    let doc = json!({"ready": ready, "init": init, "setup": actions, "daemon": daemon_json, "doctor": report});
+    app.out(&doc, || {
+        print_init(&init, false);
+        match actions.first() {
+            Some(manual) if no_host => print_no_host(&manual.detail),
+            _ => print_actions(&actions),
+        }
         match &daemon {
             Some(Ok(info)) => println!("daemon running (pid {})", info.pid),
             Some(Err(e)) => println!("daemon not started: {}", e.message),
@@ -897,12 +962,17 @@ fn cmd_up(app: &App, a: UpArgs) -> Result<i32> {
         }
         println!();
         render::doctor(&report);
-        println!(
-            "\nready. Try: hufu run -a {} \"Summarise this repository\" --wait",
-            report.executors.first().map(String::as_str).unwrap_or("<profile>")
-        );
+        let example = |agent: &str| format!("hufu run -a {agent} \"Summarise this repository\" --wait");
+        match (&try_with, valid) {
+            (_, false) => println!("\nnot ready: fix the configuration problems above, then run `hufu up` again."),
+            (Some(agent), true) => println!("\nready. Try: {}", example(agent)),
+            (None, true) => println!(
+                "\nset up, but not ready: no installed agent is logged in. Follow the next steps above, then try: {}",
+                example(report.profiles.iter().find(|p| p.installed).map(|p| p.name.as_str()).unwrap_or("<profile>"))
+            ),
+        }
     });
-    Ok(exit::OK)
+    Ok(if valid { exit::OK } else { exit::INTERNAL })
 }
 
 fn cmd_config(app: &App, c: ConfigCommand) -> Result<i32> {

@@ -368,8 +368,19 @@ fn an_agent_can_run_a_mission() {
 #[test]
 fn a_fresh_home_is_served_and_can_be_initialized() {
     // `hufu mcp` must answer on a fresh home with no configuration at all.
-    let env = Env::new("mcp-empty");
+    let mut env = Env::new("mcp-empty");
     std::fs::remove_file(env.home.join("config.yaml")).unwrap();
+    // With no agent installed there is nothing to name: no file is written, and the result says why.
+    env.only_agents(&[]);
+    {
+        let mut host = Host::start(&env, &[]);
+        host.handshake();
+        let init = host.call("hufu_init", json!({}));
+        assert_eq!(init["action"], "skipped", "{init}");
+        assert!(init["hints"][0].as_str().unwrap().contains("no supported agent is installed"), "{init}");
+        assert!(!env.home.join("config.yaml").exists());
+    }
+    env.only_agents(&["codex"]);
     let mut host = Host::start(&env, &[]);
     host.handshake();
     let agents = host.call("hufu_agents", json!({}));
@@ -379,6 +390,7 @@ fn a_fresh_home_is_served_and_can_be_initialized() {
     );
     let init = host.call("hufu_init", json!({}));
     assert_eq!(init["action"], "created");
+    assert!(init["hints"][0].as_str().unwrap().contains("only one agent is in use"), "{init}");
     assert!(env.home.join("config.yaml").exists());
     assert_eq!(host.call("hufu_init", json!({}))["action"], "kept");
     let _ = HUFU;

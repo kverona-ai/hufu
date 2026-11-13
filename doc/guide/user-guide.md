@@ -53,12 +53,27 @@ $ hufu up
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `hufu init` | Looks for agents on your `PATH` and writes `~/.hufu/config.yaml` naming them, with a default advisor and default executors. An existing file is kept |
+| 1 | `hufu init` | Looks for agents on your `PATH` and writes `~/.hufu/config.yaml` naming them, with a default advisor and default executors. An existing file is kept. With no agent found, no file is written |
 | 2 | `hufu setup` | Registers Hufu's MCP server with the agents it found, so that each of them can dispatch through Hufu. Skip with `--no-setup` |
 | 3 | `hufu daemon start` | Starts the optional daemon. Skip with `--no-daemon` |
 | 4 | `hufu doctor` | Checks installation, logins and configuration, and lists what to do next |
 
 Run `hufu up` again at any time: it changes nothing that is already in place.
+
+`hufu up` asks no questions, and its last line says where you stand:
+
+- **`ready. Try: hufu run -a <profile> ...`** Everything is set up.
+- **`hufu: not ready: no supported agent is installed`** (exit code 10). Hufu found no agent to
+  hand work to, so it stopped before changing anything: no configuration file, no registration, no
+  daemon. The output lists how to install and log in to each supported agent. Install one, then
+  run `hufu up` again.
+- **`only one agent is in use`**, under "next steps". With a single agent, that agent is both the
+  advisor and the only executor: it plans, does and reviews the work by itself. That works, but
+  Hufu is built to hand work to other agents. Install a second agent, or add a second account of
+  the same one ([section 4](#4-agents-accounts-and-pools)), and name it as an executor:
+  `hufu config set roles.executors "[codex, claude]"`.
+- **`no agent that could host Hufu was found`**. None of the agents that can call Hufu over MCP is
+  installed. The entry to add to any other MCP-capable agent is printed with it.
 
 `hufu doctor --self-test` goes one step further and runs real jobs against agents that are built
 into the binary. It needs no account and no network, and it proves that background jobs, permission
@@ -492,7 +507,7 @@ Other keys: `cwd`, `model`, `inactivity_timeout`, `output: {schema: ...}`.
 | 6 | `wait` gave up; the job is still running |
 | 7 | Lost: the runner died |
 | 8 | Rejected by an acceptance check |
-| 10 | The agent is not installed or not logged in |
+| 10 | The agent is not installed or not logged in. From `hufu up` and `hufu init`: no supported agent is installed at all |
 
 `--json`, before the command, prints one JSON document with `"v": 1` instead of text:
 `hufu --json status j_...`. An error is then a document too: `{"v": 1, "error": {"kind": ..., "message": ...}}`.
@@ -518,6 +533,9 @@ private.
 
 | What you see | What to do |
 |---|---|
+| `hufu up` ends with `not ready: no supported agent is installed` (exit 10) | No agent is installed, so nothing was set up. Install and log in to one of the agents the output lists, then run `hufu up` again |
+| `only one agent is in use` | Not an error: your one agent is both advisor and only executor. Add a second agent or account, then `hufu config set roles.executors "[<first>, <second>]"` |
+| `configuration kept`, but the file names no agent | The file was written before any agent was installed. `hufu init --force` rewrites it from the agents found |
 | Exit 10, `agent_unavailable` | The agent's program is not on `PATH`. `hufu agents --probe` shows which program is looked for |
 | Exit 10, `auth_required` | Log the agent in, or export the variable named in the message |
 | `cannot enforce permission ...` | That agent has no such tier. Pick another tier or another profile; `hufu agents` lists them |

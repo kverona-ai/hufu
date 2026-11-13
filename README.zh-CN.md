@@ -60,6 +60,14 @@ Agent 会检查本机环境，运行安装脚本和 `hufu up`，用 `hufu doctor
   Agent 命令行；
 - **重启你的 Agent**，让它看到虎符的工具。
 
+机器上装了几个 Agent，结果不一样：
+
+| 已安装的 Agent | `hufu up` 的行为 |
+|---|---|
+| 一个都没有 | 不做任何改动就停下，列出每个受支持 Agent 的安装和登录命令，以退出码 10 结束。装好一个之后，再运行一次 `hufu up` 即可 |
+| 只有一个 | 照常完成全部配置，并提示这个 Agent 同时担任 advisor 和唯一的 executor：规划、执行、复核都是它自己。再装一个 Agent，或者给同一个 Agent 加第二个账号，才能发挥虎符的用处 |
+| 两个或更多 | 照常完成全部配置。找到的第一个 Agent 担任 advisor，全部 Agent 都是 executor |
+
 之后配置虎符就是和任何一个已接入的 Agent 对话："把我的第二个 Codex 账号加进来，和现有的组成一个池"、
 "让 Claude 当 advisor"。API key 留在你自己的 shell 里，虎符只记录变量的名字。
 
@@ -84,6 +92,9 @@ $env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/s
 2. 把虎符的 MCP 服务注册到这些 Agent 里，让它们都能通过虎符派活；
 3. 启动可选的守护进程；
 4. 做一遍检查，告诉你还缺什么（比如某个 Agent 还没登录）。
+
+`hufu up` 全程不提问。只有确实有 Agent 能接活时，它才会显示 `ready`；一个 Agent 都没装时，它会停在第 1 步，
+并告诉你该装什么。
 
 想自己编译：`cargo install --git https://github.com/kverona-ai/hufu hufu-cli --locked`（需要 Rust 1.89
 或更新版本）。更多安装方式见[部署文档](doc/deployment/deployment.md)。

@@ -204,7 +204,7 @@ generated from the same definitions. What matters to callers that are agents or 
 | `6` | `wait` timed out; the job is still running |
 | `7` | Job lost |
 | `8` | Job succeeded but was rejected by its tally check |
-| `10` | Agent unavailable or not authenticated |
+| `10` | Agent unavailable or not authenticated. From `up` and `init`: no supported agent is installed |
 
 ## 6. Job store
 
@@ -633,15 +633,27 @@ The daemon is optional and stateless: everything it knows is in the job store.
 - **`hufu init`** looks for each preset's program on `PATH`, writes a commented `config.yaml`
   naming what it found, and picks default roles: the advisor is the first agent found, looking in
   the order `codex`, `claude`, `agy`, `cursor`, `kimi`, `pi`, and the executors are all the agents
-  found.
+  found. With no agent found it writes nothing (`action: skipped`, exit code `10`), so that the
+  next run, after an agent is installed, writes a complete file; an existing file is always kept,
+  and a file naming no agent would otherwise need `--force` to be refreshed. `--force` writes the
+  file regardless. With one agent found the report carries a hint that it holds both roles.
 - **`hufu setup`** registers the MCP server with host agents (table in the
   [deployment guide](../deployment/deployment.md#5-connect-host-agents)). JSON and TOML files of
   other tools are edited in place under a marker or a single key, with a one-time backup; for
   Claude Code the host's own `claude mcp add` is used, because its settings file is not a stable
   interface.
-- **`hufu up`** is `init`, `setup`, `daemon start` and `doctor` in one, and safe to repeat.
+- **`hufu up`** is `init`, `setup`, `daemon start` and `doctor` in one, and safe to repeat. It
+  never asks a question, because agents run it. It probes first: when no profile's agent is
+  installed it stops before `setup` and `daemon start`, prints each supported agent's install and
+  login command, and exits with `10`. Otherwise it reports `ready` only when the configuration is
+  valid and at least one installed agent is not known to be logged out. When no host is found it
+  returns the generic `mcpServers` entry as a `manual` action instead of registering nothing
+  silently.
 - **`hufu doctor`** probes each profile (installed, version, login where it can be seen without
-  running a model), lists configuration problems, and prints next steps. `--self-test` runs three
+  running a model), lists configuration problems, and prints next steps. Among them: no agent
+  installed (with the command that applies, `hufu up` or `hufu init --force`), a configuration
+  file that names no roles although an agent is installed, and a single profile that is both the
+  advisor and the only executor. `--self-test` runs three
   jobs against the fakes in a temporary home: a background job, an ACP job with a permission
   decision, and a cancel that must leave no process behind.
 

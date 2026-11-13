@@ -417,19 +417,64 @@ pub fn setup(hosts: &[String], opts: &SetupOptions) -> Vec<SetupAction> {
 #[derive(Clone, Debug, Serialize)]
 pub struct InitReport {
     pub path: String,
-    /// `created`, `kept` (a configuration already exists) or `replaced`.
+    /// `created`, `kept` (a configuration already exists), `replaced`, or `skipped` (no agent was
+    /// found, so no file was written).
     pub action: &'static str,
     /// Profiles whose agent was found on this machine.
     pub detected: Vec<String>,
     pub advisor: Option<String>,
     pub executors: Vec<String>,
+    /// What the user should do next, when the result needs their attention.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hints: Vec<String>,
+}
+
+/// The preset profiles `hufu init` looks for, in the order it prefers them.
+pub const PRESET_ORDER: &[&str] = &["codex", "claude", "agy", "cursor", "kimi", "pi"];
+
+/// The agents Hufu can dispatch to, each with the program it puts on `PATH`.
+pub const SUPPORTED_AGENTS: &str =
+    "Codex (`codex`), Claude Code (`claude`), Antigravity (`agy`), Cursor (`agent`), Kimi Code (`kimi`) or pi (`pi`)";
+
+/// What to run once an agent has been installed. `rewrite` is set when a configuration file
+/// exists and names no agent: `hufu init` keeps an existing file, so only `--force` refreshes it.
+pub fn after_install(rewrite: bool) -> &'static str {
+    if rewrite {
+        "run `hufu init --force` to rewrite the configuration from the agents found, then `hufu up`"
+    } else {
+        "run `hufu up` again"
+    }
+}
+
+/// The hint for a machine with no agent Hufu could dispatch to.
+pub fn no_agent_hint(rewrite: bool) -> String {
+    format!(
+        "no supported agent is installed, so Hufu has nothing to dispatch work to. Install and log in to at least one of {SUPPORTED_AGENTS}, then {}",
+        after_install(rewrite)
+    )
+}
+
+/// The hint for a configuration in which one profile is the advisor and the only executor.
+/// `others` are installed agents the configuration does not use yet.
+pub fn single_agent_hint(name: &str, others: &[String]) -> String {
+    let add = match others.first() {
+        Some(other) => format!(
+            "Also installed: {}. Add one as an executor with `hufu config set roles.executors \"[{name}, {other}]\"`",
+            others.join(", ")
+        ),
+        None => format!(
+            "Install and log in to a second agent, or add a second account of this one with `hufu profile add`, then name it as an executor with `hufu config set roles.executors \"[{name}, <other>]\"`"
+        ),
+    };
+    format!(
+        "only one agent is in use: `{name}` is both the advisor and the only executor, so it plans, does and reviews the work by itself. Hufu works this way, but it is built to hand work to other agents. {add}"
+    )
 }
 
 /// Preset profiles whose agent is installed, in a stable order.
 pub fn detect_agents(adapters: &dyn AdapterRegistry) -> Vec<String> {
-    const ORDER: &[&str] = &["codex", "claude", "agy", "cursor", "kimi", "pi"];
     let presets = config::presets();
-    ORDER
+    PRESET_ORDER
         .iter()
         .filter(|name| {
             presets.get(**name).and_then(|p| adapters.get(&p.adapter).map(|a| a.probe(p).installed)).unwrap_or(false)
@@ -439,6 +484,10 @@ pub fn detect_agents(adapters: &dyn AdapterRegistry) -> Vec<String> {
 }
 
 /// Writes a first `config.yaml` that names the agents found on this machine.
+///
+/// With no agent found there is nothing to name, so no file is written (`skipped`): the next
+/// `hufu init` or `hufu up`, after an agent is installed, then writes a complete one. `force`
+/// writes the file regardless.
 pub fn init(home: &Home, adapters: &dyn AdapterRegistry, force: bool) -> Result<InitReport> {
     let path = home.config_file();
     let detected = detect_agents(adapters);
@@ -451,6 +500,17 @@ pub fn init(home: &Home, adapters: &dyn AdapterRegistry, force: bool) -> Result<
             detected,
             advisor: None,
             executors: Vec::new(),
+            hints: Vec::new(),
+        });
+    }
+    if detected.is_empty() && !force {
+        return Ok(InitReport {
+            path: path.display().to_string(),
+            action: "skipped",
+            detected,
+            advisor: None,
+            executors: Vec::new(),
+            hints: vec![no_agent_hint(false)],
         });
     }
     let existed = path.exists();
@@ -501,12 +561,18 @@ pub fn init(home: &Home, adapters: &dyn AdapterRegistry, force: bool) -> Result<
         std::fs::create_dir_all(parent).at(parent)?;
     }
     store::write_atomic(&path, text.as_bytes())?;
+    let hints = match detected.as_slice() {
+        [] => vec![no_agent_hint(true)],
+        [only] => vec![single_agent_hint(only, &[])],
+        _ => Vec::new(),
+    };
     Ok(InitReport {
         path: path.display().to_string(),
         action: if existed { "replaced" } else { "created" },
         detected,
         advisor,
         executors,
+        hints,
     })
 }
 
@@ -562,17 +628,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    fn temp_home() -> Home {
+        Home::at(std::env::temp_dir().join(format!("hufu-init-{}", hufu_contract::time::new_id("t"))))
+    }
+
     #[test]
     fn init_writes_a_valid_configuration_once() {
-        let home = Home::at(std::env::temp_dir().join(format!("hufu-init-{}", hufu_contract::time::new_id("t"))));
-        let reg = crate::config::tests_support::kinds();
+        let home = temp_home();
+        let reg = &crate::config::tests_support::Found(&["codex-cli", "claude-cli"]);
         let first = init(&home, reg, false).unwrap();
         assert_eq!(first.action, "created");
-        assert!(first.detected.is_empty(), "the test registry reports nothing as installed");
+        assert_eq!(first.detected, vec!["codex", "claude"]);
+        assert_eq!(first.advisor.as_deref(), Some("codex"));
+        assert_eq!(first.executors, vec!["codex", "claude"]);
+        assert!(first.hints.is_empty(), "two agents need no advice: {:?}", first.hints);
         assert_eq!(init(&home, reg, false).unwrap().action, "kept");
         assert_eq!(init(&home, reg, true).unwrap().action, "replaced");
         let loaded = config::load(&home, &home.root).unwrap();
         assert!(loaded.config.problems(reg).is_empty());
+        assert_eq!(loaded.config.roles.executors, vec!["codex", "claude"]);
+        let _ = std::fs::remove_dir_all(&home.root);
+    }
+
+    #[test]
+    fn init_without_any_agent_writes_nothing_and_says_what_to_do() {
+        let home = temp_home();
+        let none = crate::config::tests_support::kinds();
+        let first = init(&home, none, false).unwrap();
+        assert_eq!(first.action, "skipped");
+        assert!(!home.config_file().exists(), "a file naming no agent would later be kept as it is");
+        let hint = first.hints.join("\n");
+        assert!(hint.contains("`codex`") && hint.contains("`pi`") && hint.contains("`hufu up` again"), "{hint}");
+        assert!(!hint.contains("--force"), "nothing was written, so a plain rerun is enough: {hint}");
+
+        // Once an agent is installed the same command completes, with no flag.
+        let one = &crate::config::tests_support::Found(&["claude-cli"]);
+        assert_eq!(init(&home, one, false).unwrap().action, "created");
+        let _ = std::fs::remove_dir_all(&home.root);
+
+        // `--force` is the explicit way to get the starter file anyway; it names the right command.
+        let home = temp_home();
+        let forced = init(&home, none, true).unwrap();
+        assert_eq!(forced.action, "created");
+        assert!(forced.hints.join("\n").contains("`hufu init --force`"), "{:?}", forced.hints);
+        let loaded = config::load(&home, &home.root).unwrap();
+        assert!(loaded.config.problems(none).is_empty());
+        let _ = std::fs::remove_dir_all(&home.root);
+    }
+
+    #[test]
+    fn init_with_one_agent_says_it_holds_both_roles() {
+        let home = temp_home();
+        let one = &crate::config::tests_support::Found(&["pi"]);
+        let report = init(&home, one, false).unwrap();
+        assert_eq!(report.action, "created");
+        assert_eq!(report.advisor.as_deref(), Some("pi"));
+        assert_eq!(report.executors, vec!["pi"]);
+        let hint = report.hints.join("\n");
+        assert!(
+            hint.contains("only one agent") && hint.contains("`pi` is both the advisor and the only executor"),
+            "{hint}"
+        );
+        assert!(hint.contains("roles.executors"), "the hint names the command that adds a second one: {hint}");
         let _ = std::fs::remove_dir_all(&home.root);
     }
 }
