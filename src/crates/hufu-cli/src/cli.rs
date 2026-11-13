@@ -74,7 +74,7 @@ pub enum Command {
     #[command(name = "__mission", hide = true)]
     MissionDriver { mission: String },
     #[command(name = "__sweep", hide = true)]
-    Sweep { exe: PathBuf },
+    Sweep { exe: PathBuf, known: Vec<String> },
 }
 
 #[derive(Args, Debug, Default)]

@@ -128,14 +128,8 @@ pub fn run(args: Cli) -> Result<i32> {
             let state = runner::run_job(&app.home, &app.adapters, &job)?;
             Ok(render::exit_code(state.state, state.verdict, state.reason.as_deref()))
         }
-        Command::Sweep { exe } => {
-            // The updater that moved the old program aside is still running from it for a moment.
-            for _ in 0..40 {
-                if update::sweep_old(&exe) == 0 {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            }
+        Command::Sweep { exe, known } => {
+            update::sweep_until_gone(&exe, &known);
             Ok(exit::OK)
         }
         Command::MissionDriver { mission } => {
@@ -947,9 +941,13 @@ fn cmd_update(app: &App, a: UpdateArgs) -> Result<i32> {
         cmd.args(args).env("HUFU_HOME", &app.home.root).current_dir(&app.cwd);
         cmd
     };
-    if update::sweep_old(&exe) > 0 {
+    // Windows only: the old program was moved aside and cannot be removed while this process,
+    // which runs from it, is alive. A short-lived helper removes it afterwards.
+    let aside = update::sweep_old(&exe);
+    if !aside.is_empty() {
         let mut cmd = helper(&["__sweep"]);
         cmd.arg(&exe)
+            .args(&aside)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());

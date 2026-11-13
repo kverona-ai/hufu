@@ -720,20 +720,36 @@ fn old_prefix(dest: &Path) -> String {
 }
 
 /// Removes programs that earlier updates moved aside (`hufu.old-*.exe`, Windows only) and that
-/// nothing runs from any more. Returns how many are still there.
-pub fn sweep_old(dest: &Path) -> usize {
+/// nothing runs from any more. Returns the names of those that are still there.
+pub fn sweep_old(dest: &Path) -> Vec<String> {
     let prefix = old_prefix(dest);
     let Some(entries) = dest.parent().and_then(|dir| std::fs::read_dir(dir).ok()) else {
-        return 0;
+        return Vec::new();
     };
-    let mut left = 0;
+    let mut left = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with(&prefix) && name.ends_with(".exe") && std::fs::remove_file(entry.path()).is_err() {
-            left += 1;
+            left.push(name);
         }
     }
     left
+}
+
+/// The helper that an update leaves behind for a moment: it removes the programs in `known` as
+/// soon as the processes that run from them have ended, the updater itself among them.
+///
+/// It gives up after a while, and at once when a program appears that it was not told about.
+/// That means a later update has moved this helper's own program aside: nothing could remove
+/// that file while this helper is running from it, and the later update has a helper of its own.
+pub fn sweep_until_gone(dest: &Path, known: &[String]) {
+    for _ in 0..60 {
+        let left = sweep_old(dest);
+        if left.is_empty() || left.iter().any(|name| !known.contains(name)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 #[cfg(test)]
@@ -922,7 +938,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0o755);
         }
-        assert_eq!(sweep_old(&dest), 0);
+        assert!(sweep_old(&dest).is_empty());
         let names: Vec<String> =
             std::fs::read_dir(&bin).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names.len(), 1, "only the program itself may be left: {names:?}");
@@ -931,6 +947,15 @@ mod tests {
         let fresh = bin.join(format!("other{}", std::env::consts::EXE_SUFFIX));
         install(&new, &fresh).unwrap();
         assert_eq!(std::fs::read(&fresh).unwrap(), b"new");
+
+        // What an update moved aside is removed, and a helper that meets a file it was not told
+        // about steps back at once instead of waiting.
+        let aside = bin.join("hufu.old-abc.exe");
+        std::fs::write(&aside, b"old").unwrap();
+        std::fs::write(bin.join("hufu.older.exe"), b"not ours").unwrap();
+        assert!(sweep_old(&dest).is_empty());
+        assert!(!aside.exists() && bin.join("hufu.older.exe").exists());
+        sweep_until_gone(&dest, &[]);
 
         let missing = scratch.path().join("no-such-dir").join("hufu");
         assert!(check_writable(&missing).is_err());
