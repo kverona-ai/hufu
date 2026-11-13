@@ -285,7 +285,7 @@ jobs:
           gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$title" --generate-notes $channel
 
   verify:
-    name: Install the published release on ${{ matrix.os }}
+    name: Install the published release
     needs: [prepare, publish]
     runs-on: ${{ matrix.os }}
     strategy:
