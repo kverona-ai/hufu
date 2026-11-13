@@ -284,6 +284,19 @@ pub fn kill(pid: u64) {
     let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output();
 }
 
+/// Ends a job's runner, then the agent it left behind, the hard way.
+///
+/// On Windows the tree kill of the runner ends the agent with it. The agent is not killed a second
+/// time by pid there: Windows hands a freed pid out again at once, so a moment later that pid can
+/// belong to a process of another test, and a tree kill of it would take that test's runner along.
+pub fn kill_job(runner: u64, agent: u64) {
+    kill(runner);
+    #[cfg(unix)]
+    kill(agent);
+    #[cfg(windows)]
+    let _ = agent;
+}
+
 pub fn strings(v: &Value) -> Vec<String> {
     v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
 }
