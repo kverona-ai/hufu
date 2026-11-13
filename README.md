@@ -44,6 +44,33 @@ anywhere except to the agents you already use.
 
 ## Install and start
 
+### Let your agent install it
+
+This is the main way to install Hufu. Paste this into the coding agent you already use (Claude
+Code, Codex, Cursor, Kimi Code, Antigravity, or any other agent that can run commands):
+
+```text
+Install and configure Hufu on this machine. Follow the guide at
+https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/guide/agent-install.md
+and tell me what you changed and what is left for me to do.
+```
+
+The agent checks the machine, runs the installer and `hufu up`, verifies the result with
+`hufu doctor`, and reports back. What is usually left for you:
+
+- **log in** to any agent that is not logged in yet. Hufu installs no agents and logs in for nobody,
+  so you need at least one agent CLI installed and logged in;
+- **restart your agent**, so that it sees Hufu's tools.
+
+After that, configuring Hufu is a conversation with any connected agent: "add my second Codex
+account and make a pool of both", "make Claude the advisor". API keys stay in your shell; Hufu
+stores only the names of the variables.
+
+The guide the agent follows is [doc/guide/agent-install.md](doc/guide/agent-install.md). An agent
+that is only given this repository finds it through [AGENTS.md](AGENTS.md) and [llms.txt](llms.txt).
+
+### Or install it by hand
+
 ```bash
 # macOS and Linux
 curl -fsSL https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.sh | sh -s -- --up
@@ -206,6 +233,10 @@ connected agent then has 22 tools: dispatch and follow jobs, run missions, and r
 Hufu's configuration, including adding profiles and pools. "Add my second Codex account to Hufu
 and make a pool of both" is a sentence you can type into any of them.
 
+An agent can also do the whole installation; that is the
+[recommended way to install](#let-your-agent-install-it), and the steps it follows are in the
+[agent install guide](doc/guide/agent-install.md).
+
 ## Roadmap
 
 | Milestone | Theme | Status |
@@ -224,6 +255,7 @@ Details: [doc/roadmap.md](doc/roadmap.md).
 
 | Document | What it covers |
 |---|---|
+| [Agent install guide](doc/guide/agent-install.md) | The steps an agent follows to install, set up, configure and check Hufu for you |
 | [User guide](doc/guide/user-guide.md) | Every command, the configuration reference, the MCP tools, recipes |
 | [Requirements](doc/requirements/requirements.md) | Goals, users, scenarios, functional and non-functional requirements |
 | [Agent landscape](doc/research/agent-landscape.md) | How each agent can be driven headlessly; the Agent Client Protocol |
@@ -244,6 +276,8 @@ Full index: [doc/README.md](doc/README.md).
 hufu/
 ├── README.md            this file
 ├── README.zh-CN.md      Chinese version
+├── AGENTS.md            where an agent should go: install, use, or change the code
+├── llms.txt             the same as an index of links, for agents and crawlers
 ├── CONTRIBUTING.md
 ├── LICENSE              Apache-2.0
 ├── .github/workflows/   CI on Linux, macOS and Windows; release builds

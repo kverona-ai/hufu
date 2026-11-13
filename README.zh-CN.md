@@ -42,6 +42,32 @@ Agent 之外不向任何地方发送数据。
 
 ## 安装和启动
 
+### 让你的 Agent 来安装
+
+这是安装虎符的首选方式。把下面这段话贴给你正在用的编码 Agent（Claude Code、Codex、Cursor、Kimi Code、
+Antigravity，或者其他任何能执行命令的 Agent）：
+
+```text
+请在这台机器上安装并配置 Hufu（虎符）。按这份指南操作：
+https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/guide/agent-install.md
+完成后告诉我你改了什么，还有哪些事需要我自己做。
+```
+
+Agent 会检查本机环境，运行安装脚本和 `hufu up`，用 `hufu doctor` 核对结果，然后向你汇报。通常只剩两件事
+需要你自己做：
+
+- **登录**还没登录的 Agent。虎符不替你安装 Agent，也不替你登录，所以机器上至少要有一个已安装并已登录的
+  Agent 命令行；
+- **重启你的 Agent**，让它看到虎符的工具。
+
+之后配置虎符就是和任何一个已接入的 Agent 对话："把我的第二个 Codex 账号加进来，和现有的组成一个池"、
+"让 Claude 当 advisor"。API key 留在你自己的 shell 里，虎符只记录变量的名字。
+
+Agent 照着做的那份指南是 [doc/guide/agent-install.md](doc/guide/agent-install.md)（英文）。如果只把这个
+仓库的地址交给 Agent，它可以通过 [AGENTS.md](AGENTS.md) 和 [llms.txt](llms.txt) 找到这份指南。
+
+### 也可以手动安装
+
 ```bash
 # macOS 和 Linux
 curl -fsSL https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.sh | sh -s -- --up
@@ -198,6 +224,9 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 工具：派发和跟踪作业、运行 mission，以及读取和修改虎符的配置，包括添加 profile 和账号池。
 "把我的第二个 Codex 账号加进虎符，和现有的组成一个池"这样的话，可以直接对其中任何一个 Agent 说。
 
+整个安装过程也可以交给 Agent 来做，这是[首选的安装方式](#让你的-agent-来安装)，它照着做的步骤写在
+[Agent 安装指南](doc/guide/agent-install.md)里。
+
 ## 路线图
 
 | 里程碑 | 主题 | 状态 |
@@ -218,6 +247,7 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 
 | 文档 | 内容 |
 |---|---|
+| [Agent 安装指南](doc/guide/agent-install.md) | Agent 替你安装、初始化、配置并检查虎符时所遵循的步骤 |
 | [用户指南](doc/guide/user-guide.md) | 全部命令、配置参考、MCP 工具、常见用法 |
 | [需求](doc/requirements/requirements.md) | 目标、用户、场景、功能性和非功能性需求 |
 | [Agent 调研](doc/research/agent-landscape.md) | 各 Agent 如何无人值守地驱动；Agent Client Protocol |
@@ -238,6 +268,8 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 hufu/
 ├── README.md            英文说明
 ├── README.zh-CN.md      本文件
+├── AGENTS.md            给 Agent 的指引：安装、使用或修改代码时分别该看什么
+├── llms.txt             同样的内容，以链接索引的形式提供给 Agent 和爬虫
 ├── CONTRIBUTING.md
 ├── LICENSE              Apache-2.0
 ├── .github/workflows/   Linux、macOS、Windows 三平台 CI；发布构建

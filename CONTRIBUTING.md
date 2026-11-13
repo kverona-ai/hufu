@@ -16,8 +16,10 @@ private from the output first.
 | Sample configuration and specs | `doc/examples/` |
 | Images | `doc/assets/` |
 
-The repository root holds only the READMEs, the licence and repository metadata (which includes
-`.github/`, because GitHub reads workflows from nowhere else).
+The repository root holds only the READMEs, the licence and repository metadata. That includes
+`.github/`, because GitHub reads workflows from nowhere else, and `AGENTS.md` and `llms.txt`,
+because agents look for them in the root. Both only point to documents under `doc/`; keep them in
+step with the [agent install guide](doc/guide/agent-install.md).
 
 ## Proposing a change
 

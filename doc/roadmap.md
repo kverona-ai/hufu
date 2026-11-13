@@ -107,7 +107,7 @@ them a model reached through pi.
 | MCP server with 22 tools, including configuration tools | FR-45, FR-58, FR-59 |
 | Retry policies | FR-10 |
 | Several accounts per agent, pools with failover, round-robin and least-busy | FR-60 to FR-62 |
-| One-command setup: `hufu up`, `hufu init`, `hufu setup` for five hosts; install scripts | FR-63, FR-64, FR-66 |
+| One-command setup: `hufu up`, `hufu init`, `hufu setup` for five hosts; install scripts; an [install guide written for agents](guide/agent-install.md), found through `AGENTS.md` and `llms.txt` | FR-63, FR-64, FR-66 |
 | Windows support | NFR-07 |
 
 **Exit criteria.** An MCP client submits a job and reads its result; the tests do this with a

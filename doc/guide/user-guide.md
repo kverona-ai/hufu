@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Describes Hufu 0.1 as implemented. The examples in it are checked by the test suite where they are files under `doc/examples/` |
-| **Last updated** | 2026-11-12 |
-| **Related** | [Deployment](../deployment/deployment.md), [Technical design](../technical/technical-design.md), [Adapter contract](../technical/adapter-contract.md) |
+| **Last updated** | 2026-11-13 (pointer to the agent install guide) |
+| **Related** | [Agent install guide](agent-install.md), [Deployment](../deployment/deployment.md), [Technical design](../technical/technical-design.md), [Adapter contract](../technical/adapter-contract.md) |
 
 Everything you can do with Hufu, from the first command to missions and computer use.
 For why it works this way, see the [architecture](../architecture/architecture.md); for how it is
@@ -28,6 +28,10 @@ built, the [technical design](../technical/technical-design.md).
 - [16. Known limits](#16-known-limits)
 
 ## 1. Install and set up
+
+The usual way is to let the coding agent you already use do it: give it the
+[agent install guide](agent-install.md) and it installs, sets up and checks Hufu, then tells you
+what is left for you (normally a login and a restart of the agent). The same steps by hand:
 
 ```bash
 # macOS and Linux
