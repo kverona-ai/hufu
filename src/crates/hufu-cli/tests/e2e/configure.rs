@@ -19,7 +19,8 @@ fn fresh(name: &str) -> Env {
 
 #[test]
 fn a_fresh_machine_works_with_presets_and_init_writes_a_first_file() {
-    let env = fresh("init");
+    let mut env = fresh("init");
+    env.only_agents(&["codex", "agy"]);
     // Without any file there are presets for every supported agent.
     let (_, agents) = env.json(&["agents"]);
     let names: Vec<String> =
@@ -34,6 +35,10 @@ fn a_fresh_machine_works_with_presets_and_init_writes_a_first_file() {
     let (code, init) = env.json(&["init"]);
     assert_eq!(code, 0, "{init}");
     assert_eq!(init["action"], "created");
+    assert_eq!(strings(&init["detected"]), vec!["codex", "agy"]);
+    assert_eq!(init["advisor"], "codex");
+    assert_eq!(strings(&init["executors"]), vec!["codex", "agy"]);
+    assert!(init.get("hints").is_none(), "two agents need no advice: {init}");
     let text = std::fs::read_to_string(env.home.join("config.yaml")).unwrap();
     assert!(text.contains("version: 1") && text.contains("read-only"), "{text}");
     env.hufu(&["config", "validate"]).expect(0);
@@ -51,19 +56,128 @@ fn a_fresh_machine_works_with_presets_and_init_writes_a_first_file() {
 
 #[test]
 fn up_prepares_everything_in_one_command() {
-    let env = fresh("up");
+    let mut env = fresh("up");
+    env.at_least_agents(&["codex", "agy"]);
     let (code, up) = env.json(&["up", "--no-setup"]);
     let _ = env.hufu(&["daemon", "stop"]);
     assert_eq!(code, 0, "{up}");
+    assert_eq!(up["ready"], true);
     assert_eq!(up["init"]["action"], "created");
     assert_eq!(up["daemon"]["running"], true);
+    assert!(up["doctor"]["daemon"]["pid"].is_number(), "the report shows the daemon that was just started: {up}");
     assert!(up["doctor"]["profiles"].as_array().unwrap().len() >= 6);
     // Running it again changes nothing and still succeeds.
     let (code, again) = env.json(&["up", "--no-setup", "--no-daemon"]);
     assert_eq!(code, 0);
     assert_eq!(again["init"]["action"], "kept");
     assert_eq!(again["daemon"]["skipped"], true);
-    assert!(env.hufu(&["up", "--no-setup", "--no-daemon"]).expect(0).stdout.contains("ready."));
+    let text = env.hufu(&["up", "--no-setup", "--no-daemon"]).expect(0).stdout;
+    assert!(text.contains("ready. Try: hufu run -a codex "), "{text}");
+    assert!(!text.contains("only one agent"), "{text}");
+}
+
+#[test]
+fn up_without_any_agent_stops_and_says_what_to_install() {
+    let mut env = fresh("up-none");
+    env.only_agents(&[]);
+    let (code, up) = env.json(&["up"]);
+    assert_eq!(code, 10, "no agent is exit code 10: {up}");
+    assert_eq!(up["ready"], false);
+    assert_eq!(up["reason"], "no_agent");
+    assert_eq!(up["init"]["action"], "skipped");
+    assert!(up["next"].as_str().unwrap().contains("`hufu up` again"), "{up}");
+    assert!(up["setup"].as_array().unwrap().is_empty(), "nothing is registered anywhere: {up}");
+    assert_eq!(up["daemon"]["skipped"], true);
+    assert_eq!(env.json(&["daemon", "status"]).1["running"], false, "no daemon is started for nothing");
+    assert!(!env.home.join("config.yaml").exists(), "a file naming no agent would be kept by the next run");
+
+    let r = env.hufu(&["up"]).expect(10);
+    for needle in
+        ["no agent to dispatch work to", "Install at least one of these", "codex login", "Then run `hufu up` again."]
+    {
+        assert!(r.stdout.contains(needle), "expected `{needle}` in: {}", r.stdout);
+    }
+    assert!(!r.stdout.contains("ready. Try"), "nothing is ready: {}", r.stdout);
+    assert!(r.stderr.contains("not ready: no supported agent is installed"), "{}", r.stderr);
+
+    // `hufu init` alone behaves the same way.
+    let (code, init) = env.json(&["init"]);
+    assert_eq!((code, init["action"].as_str()), (10, Some("skipped")), "{init}");
+    assert!(strings(&init["hints"])[0].contains("Kimi Code (`kimi`)"), "{init}");
+
+    // Once an agent is installed, the same command finishes the setup. No flag is needed.
+    env.only_agents(&["pi"]);
+    let (code, up) = env.json(&["up", "--no-daemon"]);
+    assert_eq!(code, 0, "{up}");
+    assert_eq!((up["ready"].as_bool(), up["init"]["action"].as_str()), (Some(true), Some("created")), "{up}");
+}
+
+#[test]
+fn an_existing_file_that_names_no_agent_is_fixed_with_init_force() {
+    let mut env = fresh("up-empty-file");
+    env.only_agents(&[]);
+    // `--force` writes the starter file even with nothing to name.
+    let (code, init) = env.json(&["init", "--force"]);
+    assert_eq!((code, init["action"].as_str()), (0, Some("created")), "{init}");
+    let (_, doc) = env.json(&["doctor"]);
+    assert!(
+        strings(&doc["hints"]).iter().any(|h| h.contains("no supported agent") && h.contains("`hufu init --force`")),
+        "plain `hufu init` would keep the file: {doc}"
+    );
+    let r = env.hufu(&["up"]).expect(10);
+    assert!(r.stdout.contains("configuration kept") && r.stdout.contains("run `hufu init --force`"), "{}", r.stdout);
+
+    // With an agent installed later, the file still names none, and doctor says how to refresh it.
+    env.only_agents(&["codex"]);
+    let (_, doc) = env.json(&["doctor"]);
+    assert!(
+        strings(&doc["hints"])
+            .iter()
+            .any(|h| h.contains("names no advisor and no executors") && h.contains("`hufu init --force`")),
+        "{doc}"
+    );
+    let (code, init) = env.json(&["init", "--force"]);
+    assert_eq!((code, init["action"].as_str()), (0, Some("replaced")), "{init}");
+    assert_eq!(env.json(&["doctor"]).1["advisor"], "codex");
+}
+
+#[test]
+fn up_with_one_agent_says_it_holds_both_roles() {
+    let mut env = fresh("up-one");
+    // pi can do the work but cannot host Hufu, so there is also nothing to register with.
+    env.only_agents(&["pi"]);
+    let (code, up) = env.json(&["up", "--no-daemon"]);
+    assert_eq!(code, 0, "{up}");
+    assert_eq!(up["ready"], true);
+    assert_eq!(up["init"]["advisor"], "pi");
+    assert_eq!(strings(&up["init"]["executors"]), vec!["pi"]);
+    let single = |doc: &Value| strings(&doc["hints"]).into_iter().find(|h| h.contains("only one agent"));
+    let hint = single(&up["doctor"]).unwrap_or_else(|| panic!("no single-agent hint in {up}"));
+    assert!(
+        hint.contains("`pi` is both the advisor and the only executor") && hint.contains("roles.executors"),
+        "{hint}"
+    );
+    assert_eq!(up["setup"][0]["host"], "generic");
+    assert_eq!(up["setup"][0]["action"], "manual");
+    assert!(up["setup"][0]["detail"].as_str().unwrap().contains("mcpServers"), "{up}");
+
+    let text = env.hufu(&["up", "--no-daemon"]).expect(0).stdout;
+    for needle in [
+        "no agent that could host Hufu was found",
+        "\"mcpServers\"",
+        "only one agent is in use",
+        "ready. Try: hufu run -a pi ",
+    ] {
+        assert!(text.contains(needle), "expected `{needle}` in: {text}");
+    }
+    assert!(env.hufu(&["init", "--force"]).expect(0).stdout.contains("note: only one agent is in use"));
+
+    // A second agent installed later is named in the hint, and using it ends the hint.
+    env.only_agents(&["codex"]);
+    let hint = single(&env.json(&["doctor"]).1).expect("still one agent in use");
+    assert!(hint.contains("Also installed: codex") && hint.contains("\"[pi, codex]\""), "{hint}");
+    env.hufu(&["config", "set", "roles.executors", "[pi, codex]"]).expect(0);
+    assert_eq!(single(&env.json(&["doctor"]).1), None);
 }
 
 #[test]

@@ -119,7 +119,13 @@ if (-not $onPath) {
 
 Write-Host ""
 if ($Up) {
+    # `hufu up` stops with a message of its own when something is missing, for example when no
+    # agent is installed (exit code 10). The program itself is installed either way.
     & $exe up
+    if ($LASTEXITCODE -ne 0) {
+        # `throw`, not `exit`: under `irm | iex` an `exit` would close the user's terminal.
+        throw "hufu is installed at $exe, but setup is not finished (hufu up ended with exit code $LASTEXITCODE). Do what the message above asks, then run: $exe up"
+    }
 } else {
     Write-Host "Next: run ``hufu up`` to configure Hufu, register it with your agents and start the daemon."
 }

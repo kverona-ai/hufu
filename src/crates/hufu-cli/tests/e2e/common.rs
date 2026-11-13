@@ -18,6 +18,8 @@ pub struct Env {
     pub home: PathBuf,
     pub work: PathBuf,
     pub vars: Vec<(String, String)>,
+    /// Variables taken out of the environment of every `hufu` this starts.
+    pub unset: Vec<String>,
 }
 
 pub struct Ran {
@@ -64,7 +66,7 @@ impl Env {
         // Symlinked temp directories (macOS) would make path comparisons fail.
         let root = root.canonicalize().unwrap_or(root);
         let root = PathBuf::from(root.to_string_lossy().trim_start_matches(r"\\?\").to_string());
-        let env = Env { home: root.join("home"), work: root.join("work"), root, vars: Vec::new() };
+        let env = Env { home: root.join("home"), work: root.join("work"), root, vars: Vec::new(), unset: Vec::new() };
         env.config(json!({}));
         env
     }
@@ -93,6 +95,52 @@ impl Env {
         self.vars.push((key.to_string(), value.to_string()));
     }
 
+    /// Makes this machine look as if exactly these agent programs were installed: `PATH` holds
+    /// nothing else, and the user's home is an empty directory, so no agent's settings are found
+    /// either. Each program is the binary under test, which answers `--version` like any other.
+    /// Calling it again adds programs.
+    pub fn only_agents(&mut self, programs: &[&str]) {
+        let bin = self.install_agents(programs);
+        self.set("PATH", &bin.to_string_lossy());
+    }
+
+    /// Like [`Env::only_agents`], but the system's own `PATH` stays behind the fake programs, for
+    /// tests that need system tools. Agents really installed on the machine are then found too.
+    pub fn at_least_agents(&mut self, programs: &[&str]) {
+        let bin = self.install_agents(programs);
+        let rest = std::env::var_os("PATH").unwrap_or_default();
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&rest))).unwrap();
+        self.set("PATH", &path.to_string_lossy());
+    }
+
+    fn install_agents(&mut self, programs: &[&str]) -> PathBuf {
+        let bin = self.root.join("bin");
+        let user_home = self.root.join("user-home");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&user_home).unwrap();
+        for program in programs {
+            let target = bin.join(format!("{program}{}", std::env::consts::EXE_SUFFIX));
+            if !target.exists() && std::fs::hard_link(HUFU, &target).is_err() {
+                std::fs::copy(HUFU, &target).unwrap();
+            }
+        }
+        self.set("HOME", &user_home.to_string_lossy());
+        self.set("USERPROFILE", &user_home.to_string_lossy());
+        for var in [
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "CURSOR_CONFIG_DIR",
+            "KIMI_CODE_HOME",
+            "HUFU_AGY_CONFIG_DIR",
+            "PI_CODING_AGENT_DIR",
+            "CODEX_API_KEY",
+            "CURSOR_API_KEY",
+        ] {
+            self.unset.push(var.to_string());
+        }
+        bin
+    }
+
     pub fn command(&self, cwd: &Path) -> Command {
         let mut cmd = Command::new(HUFU);
         cmd.current_dir(cwd)
@@ -101,6 +149,9 @@ impl Env {
             .env("HUFU_STALE_AFTER_MS", "1500")
             .env_remove("HUFU_FAKE_SCENARIO")
             .env_remove("HUFU_EXE");
+        for k in &self.unset {
+            cmd.env_remove(k);
+        }
         for (k, v) in &self.vars {
             cmd.env(k, v);
         }
@@ -231,6 +282,19 @@ pub fn kill(pid: u64) {
     let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
     #[cfg(windows)]
     let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output();
+}
+
+/// Ends a job's runner, then the agent it left behind, the hard way.
+///
+/// On Windows the tree kill of the runner ends the agent with it. The agent is not killed a second
+/// time by pid there: Windows hands a freed pid out again at once, so a moment later that pid can
+/// belong to a process of another test, and a tree kill of it would take that test's runner along.
+pub fn kill_job(runner: u64, agent: u64) {
+    kill(runner);
+    #[cfg(unix)]
+    kill(agent);
+    #[cfg(windows)]
+    let _ = agent;
 }
 
 pub fn strings(v: &Value) -> Vec<String> {

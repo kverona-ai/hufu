@@ -62,6 +62,14 @@ The agent checks the machine, runs the installer and `hufu up`, verifies the res
   so you need at least one agent CLI installed and logged in;
 - **restart your agent**, so that it sees Hufu's tools.
 
+How many agents you have matters:
+
+| Agents installed | What `hufu up` does |
+|---|---|
+| None | Stops before changing anything, lists how to install and log in to each supported agent, and exits with code 10. Install one, then run `hufu up` again |
+| One | Sets everything up, and tells you that this agent is both the advisor and the only executor: it plans, does and reviews the work by itself. Add a second agent, or a second account of the same one, to get what Hufu is for |
+| Two or more | Sets everything up. The first agent found advises, and all of them execute |
+
 After that, configuring Hufu is a conversation with any connected agent: "add my second Codex
 account and make a pool of both", "make Claude the advisor". API keys stay in your shell; Hufu
 stores only the names of the variables.
@@ -88,6 +96,9 @@ command that sets everything up:
 2. registers Hufu's MCP server with those agents, so that each of them can dispatch through Hufu,
 3. starts the optional daemon,
 4. checks the result and tells you what is still missing (for example a login).
+
+`hufu up` asks no questions. It prints `ready` only when an agent can actually take work; with no
+agent installed it stops at step 1 and says what to install.
 
 Prefer to build it yourself? `cargo install --git https://github.com/kverona-ai/hufu hufu-cli --locked`
 (Rust 1.89 or newer). More ways to install: [deployment guide](doc/deployment/deployment.md).

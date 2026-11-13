@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{Env, HUFU, fake, kill, strings};
+use crate::common::{Env, HUFU, fake, kill_job, strings};
 
 fn files(result: &Value) -> Vec<String> {
     strings(&result["changes"]["files"])
@@ -290,9 +290,8 @@ fn a_job_whose_runner_died_is_reported_as_lost() {
     let state: Value =
         serde_json::from_str(&std::fs::read_to_string(env.job_file(&job, "state.json")).unwrap()).unwrap();
     let agent = state["agent_pid"].as_u64().unwrap();
-    kill(state["runner_pid"].as_u64().expect("the runner's pid is recorded"));
+    kill_job(state["runner_pid"].as_u64().expect("the runner's pid is recorded"), agent);
     let r = env.hufu(&["wait", &job, "--timeout", "30s"]);
-    kill(agent);
     assert_eq!(r.code, 7, "{} {}", r.stdout, r.stderr);
     let (code, result) = env.json(&["result", &job]);
     assert_eq!(code, 7);

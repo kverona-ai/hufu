@@ -112,10 +112,17 @@ hufu up
 
 | Step | Equivalent command | Result |
 |---|---|---|
-| Configuration | `hufu init` | `~/.hufu/config.yaml` with one profile per agent found, a default advisor and default executors. An existing file is kept |
+| Configuration | `hufu init` | `~/.hufu/config.yaml` with one profile per agent found, a default advisor and default executors. An existing file is kept. With no agent found, no file is written |
 | Host registration | `hufu setup` | Hufu's MCP server registered with every agent found. `hufu up --no-setup` skips it |
 | Daemon | `hufu daemon start` | The optional daemon runs. `hufu up --no-daemon` skips it |
 | Check | `hufu doctor` | A table of agents with installation and login state, and the next steps |
+
+`hufu up` needs at least one agent to dispatch to. With none on `PATH` it stops before the first
+step changes anything, lists the install and login command of every supported agent, and exits
+with code `10`; run it again once an agent is installed. With exactly one agent it succeeds and
+notes, under the next steps, that this agent is both the advisor and the only executor. An
+installer started with `--up` passes a failed `hufu up` on: it says that the program is installed
+and that setup is not finished, and ends with the same exit code.
 
 Then adjust to taste, by command, by hand or through any connected agent:
 

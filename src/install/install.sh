@@ -164,7 +164,15 @@ esac
 
 if [ "$UP" = "1" ]; then
     say ""
-    "$DIR/hufu" up
+    # `hufu up` stops with a message of its own when something is missing, for example when no
+    # agent is installed (exit code 10). The program itself is installed either way.
+    "$DIR/hufu" up || {
+        code=$?
+        say ""
+        say "hufu is installed at $DIR/hufu, but setup is not finished (exit code $code)."
+        say "Do what the message above asks, then run: $DIR/hufu up"
+        exit "$code"
+    }
 else
     say ""
     say "Next: run \`hufu up\` to configure Hufu, register it with your agents and start the daemon."

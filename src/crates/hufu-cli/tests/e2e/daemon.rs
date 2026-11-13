@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{Env, kill};
+use crate::common::{Env, kill, kill_job};
 
 /// Stops the daemon when the test ends, however it ends.
 struct Daemon<'a>(&'a Env);
@@ -116,8 +116,7 @@ fn the_daemon_restarts_a_lost_job_that_may_be_retried() {
     env.until(&job, "running", |s| s["state"] == "running" && s["last_activity"].is_string());
     let before = state_file(&env, &job);
     let (runner, agent) = (before["runner_pid"].as_u64().unwrap(), before["agent_pid"].as_u64().unwrap());
-    kill(runner);
-    kill(agent);
+    kill_job(runner, agent);
     let started = std::time::Instant::now();
     loop {
         let _ = env.state(&job); // reading the state is what notices the dead runner
@@ -138,8 +137,7 @@ fn the_daemon_restarts_a_lost_job_that_may_be_retried() {
     let once = env.start(&["-a", "codex", "[[fake:hang]]"]);
     env.until(&once, "running", |s| s["state"] == "running" && s["last_activity"].is_string());
     let s = state_file(&env, &once);
-    kill(s["runner_pid"].as_u64().unwrap());
-    kill(s["agent_pid"].as_u64().unwrap());
+    kill_job(s["runner_pid"].as_u64().unwrap(), s["agent_pid"].as_u64().unwrap());
     env.hufu(&["wait", &once, "--timeout", "30s"]).expect(7);
     std::thread::sleep(std::time::Duration::from_millis(1200));
     assert_eq!(env.state(&once)["state"], "lost");

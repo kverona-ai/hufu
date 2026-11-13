@@ -10,6 +10,8 @@ Follow **[doc/guide/agent-install.md](doc/guide/agent-install.md)** from top to 
 
 1. Check that at least one agent program (`codex`, `agy`, `agent`, `kimi`, `claude` or `pi`) is
    installed and logged in. Hufu installs no agents and logs in for nobody; that part is the user's.
+   With none, `hufu up` sets nothing up: it lists how to install each agent and exits with code
+   `10`. Pass that on to the user and run `hufu up` again afterwards.
 2. Install and set up with one command:
 
    ```bash
@@ -25,7 +27,8 @@ Follow **[doc/guide/agent-install.md](doc/guide/agent-install.md)** from top to 
    Until the first release is tagged the installer builds from source, which needs Rust 1.89 or
    newer and takes a minute or more.
 3. Run `hufu --json doctor` and act on its `hints`. `hufu doctor --self-test` proves that jobs run,
-   without any account.
+   without any account. If a hint says `only one agent is in use`, tell the user: that agent is
+   both the advisor and the only executor, and a second agent or account is worth adding.
 4. Tell the user to restart their agent: the `hufu_*` MCP tools appear in new sessions only. For a
    host Hufu does not know, `hufu setup --agent generic --print` prints the entry to add.
 5. Configure with the `hufu` command line now (`hufu profile add`, `hufu pool add`,

@@ -766,7 +766,9 @@ pub(crate) mod tests_support {
     use hufu_contract::{Adapter, AdapterRegistry, Profile};
 
     pub struct Kinds;
-    struct Fake(&'static str, Option<&'static str>);
+    /// Registers every kind like [`Kinds`], and reports the listed kinds as installed.
+    pub struct Found(pub &'static [&'static str]);
+    struct Fake(&'static str, Option<&'static str>, bool);
     impl Adapter for Fake {
         fn kind(&self) -> &'static str {
             self.0
@@ -778,7 +780,7 @@ pub(crate) mod tests_support {
             self.1
         }
         fn probe(&self, _: &Profile) -> hufu_contract::ProbeResult {
-            Default::default()
+            hufu_contract::ProbeResult { installed: self.2, ..Default::default() }
         }
         fn capabilities(&self, _: &Profile) -> hufu_contract::Capabilities {
             unimplemented!()
@@ -800,19 +802,33 @@ pub(crate) mod tests_support {
             unimplemented!()
         }
     }
-    static FAKES: [Fake; 8] = [
-        Fake("codex-cli", Some("CODEX_HOME")),
-        Fake("agy-cli", None),
-        Fake("cursor-cli", Some("CURSOR_CONFIG_DIR")),
-        Fake("kimi-cli", Some("KIMI_CODE_HOME")),
-        Fake("pi", Some("PI_CODING_AGENT_DIR")),
-        Fake("claude-cli", Some("CLAUDE_CONFIG_DIR")),
-        Fake("acp", None),
-        Fake("external", None),
-    ];
+    const fn fakes(installed: bool) -> [Fake; 8] {
+        [
+            Fake("codex-cli", Some("CODEX_HOME"), installed),
+            Fake("agy-cli", None, installed),
+            Fake("cursor-cli", Some("CURSOR_CONFIG_DIR"), installed),
+            Fake("kimi-cli", Some("KIMI_CODE_HOME"), installed),
+            Fake("pi", Some("PI_CODING_AGENT_DIR"), installed),
+            Fake("claude-cli", Some("CLAUDE_CONFIG_DIR"), installed),
+            Fake("acp", None, installed),
+            Fake("external", None, installed),
+        ]
+    }
+    static FAKES: [Fake; 8] = fakes(false);
+    static INSTALLED: [Fake; 8] = fakes(true);
     impl AdapterRegistry for Kinds {
         fn get(&self, kind: &str) -> Option<&dyn Adapter> {
             FAKES.iter().find(|f| f.0 == kind).map(|f| f as &dyn Adapter)
+        }
+        fn kinds(&self) -> Vec<&'static str> {
+            FAKES.iter().map(|f| f.0).collect()
+        }
+    }
+
+    impl AdapterRegistry for Found {
+        fn get(&self, kind: &str) -> Option<&dyn Adapter> {
+            let set = if self.0.contains(&kind) { &INSTALLED } else { &FAKES };
+            set.iter().find(|f| f.0 == kind).map(|f| f as &dyn Adapter)
         }
         fn kinds(&self) -> Vec<&'static str> {
             FAKES.iter().map(|f| f.0).collect()
