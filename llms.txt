@@ -14,6 +14,8 @@ executor, and `hufu doctor` says so); run
 (Windows PowerShell: `$env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.ps1 | iex`);
 check with `hufu --json doctor`; ask the user to restart their agent so that the `hufu_*` MCP tools
 appear. API keys stay in the user's environment; the configuration holds only variable names.
+To update an installed Hufu, run `hufu --json update` (`--check` only reports), then ask the user
+to restart their agent.
 
 ## Install and configure
 

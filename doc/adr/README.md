@@ -18,13 +18,15 @@ later reversed is marked *Superseded* and links to its replacement.
 | [0010](0010-accounts-are-profiles-pools-group-them.md) | An account is a profile; pools group profiles that can stand in for each other | Accepted |
 | [0011](0011-the-daemon-is-optional.md) | The daemon is optional; limits are enforced by the runners themselves | Accepted |
 | [0012](0012-connected-agents-may-configure-hufu.md) | Setup is one command, and connected agents may configure Hufu | Accepted |
+| [0013](0013-self-update-with-system-tools.md) | Hufu updates itself with the system's download and archive tools, and checks the result itself | Accepted |
 
 **Status values:** *Proposed* (written, waiting for the project owner), *Accepted*, *Superseded*.
 Records 0001, 0002, 0004 and 0005 restate conclusions of the scoping discussion that started the
 project. Records 0007, 0010 and 0012 follow decisions or requirements of the project owner. Records
 0006 and 0008 were proposals; they became accepted when the project owner asked for the whole plan
 to be implemented, and the system was built on them. Records 0009 and 0011 were made during that
-implementation and change parts of earlier documents; each says which.
+implementation and change parts of earlier documents; each says which. Record 0013 was made when
+`hufu update` was added at the project owner's request.
 
 ## Template
 

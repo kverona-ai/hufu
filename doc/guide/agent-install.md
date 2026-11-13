@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented. No release has been tagged yet, so the install script builds from source until the first tag |
-| **Last updated** | 2026-11-13 (first version) |
+| **Status** | Describes Hufu 0.1 as implemented. Releases so far are pre-releases. Where no prebuilt binary can be downloaded, the install script builds from source |
+| **Last updated** | 2026-11-13 (`hufu update`) |
 | **Audience** | A coding agent (Claude Code, Codex, Cursor, Kimi Code, Antigravity or any other agent with a shell) whose user asked it to install or configure Hufu |
 | **Related** | [User guide](user-guide.md), [Deployment](../deployment/deployment.md), [sample configuration](../examples/config.yaml) |
 
@@ -61,7 +61,7 @@ Rules that hold for every step:
 | Linux, macOS or Windows on x86-64 or ARM64 | `uname -sm`; on Windows `$env:PROCESSOR_ARCHITECTURE` | Stop: other platforms are not supported |
 | At least one agent program, installed and logged in | See the table below | Stop and ask the user to install and log in to one. Hufu installs no agents and logs in for nobody |
 | `curl` or `wget` (macOS, Linux) | `command -v curl wget` | Ask the user |
-| Rust 1.89 or newer, **only while no release is tagged** | `cargo --version` | Tell the user that Hufu is built from source for now and that this needs Rust from <https://rustup.rs>. Install it only if they agree |
+| Rust 1.89 or newer, **only if no prebuilt binary can be downloaded** | `cargo --version` | Needed only when the installer prints `No prebuilt binary could be downloaded`. Tell the user that Hufu then has to be built from source and that this needs Rust from <https://rustup.rs>. Install it only if they agree |
 | Git, optional | `git --version` | Hufu works without it, but worktree isolation needs it |
 
 The agents Hufu can drive, and the program each one puts on `PATH`:
@@ -85,8 +85,8 @@ of the programs above to hand work to.
 
 ## 3. Install and set up
 
-One command installs the program and sets everything up. Building from source takes a minute or
-more, so give the command a timeout of at least ten minutes.
+One command installs the program and sets everything up. It normally takes seconds. If it has to
+build from source it takes a minute or more, so give the command a timeout of at least ten minutes.
 
 ```bash
 # macOS and Linux
@@ -101,7 +101,7 @@ $env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/s
 What the installer does:
 
 1. Downloads the release archive for this platform and its SHA-256 file, and verifies the sum.
-2. If no archive can be downloaded, which is the case until the first release is tagged, it prints
+2. If no archive can be downloaded (no release for this platform, or GitHub cannot be reached), it prints
    `No prebuilt binary could be downloaded for this machine` and builds with `cargo install`
    instead. That needs Rust 1.89 or newer.
 3. Puts one program on the machine: `~/.local/bin/hufu`, or `%LOCALAPPDATA%\hufu\bin\hufu.exe` on
@@ -373,7 +373,7 @@ Read by the install scripts:
 | `HUFU_VERSION` | A release tag such as `v0.1.0`. Default: the latest release |
 | `HUFU_INSTALL_DIR` | Where to put the program. Default `~/.local/bin`, on Windows `%LOCALAPPDATA%\hufu\bin` |
 | `HUFU_FROM_SOURCE` | `1` builds with cargo instead of downloading |
-| `HUFU_DOWNLOAD_BASE` | The URL of a mirror that holds the release archives and their checksums |
+| `HUFU_DOWNLOAD_BASE` | The URL of a mirror that holds the release archives and their checksums. `hufu update` reads it too, and also accepts a local directory |
 
 Read by `hufu` itself:
 
@@ -391,8 +391,25 @@ needs under `env`, and Hufu passes those through from the shell that runs it.
 
 | Task | Steps |
 |---|---|
-| Upgrade | Run the install command again, then `hufu doctor`. Running jobs keep the program they started with |
+| See whether a newer release exists | `hufu --json update --check`: read `current`, `latest` and `update_available`. Nothing is changed |
+| Upgrade | `hufu --json update`. Running jobs keep the program they started with |
 | Uninstall | `hufu setup --remove`, `hufu daemon stop`, delete the `hufu` program, then delete `~/.hufu` |
+
+`hufu update` downloads the newest release, checks its SHA-256 sum, makes sure the new program
+starts, replaces the old one, restarts the daemon if one was running and runs `hufu doctor`. It
+asks no question. Give it a timeout of at least ten minutes, because it builds from source when
+there is no release to download. Then:
+
+- read the result: `updated`, `from`, `to`, `doctor_ok` and the `doctor` report, and act on the
+  report's `hints` as in [section 4](#4-read-the-result). `"updated": false` with
+  `"reason": "up_to_date"` means there was nothing to do;
+- tell the user to **restart their agent**: its MCP server is still the old program until then;
+- if the command is not there (`unrecognized subcommand 'update'`), the installed Hufu is older
+  than this command: run the install command from [section 3](#3-install-and-set-up) again, then
+  `hufu doctor`.
+
+A particular release is installed with `hufu update --version <tag>`, which is also the way back
+to an older one.
 
 Deleting files is the user's decision. Before removing `~/.hufu`, say that it holds the
 configuration and all job records.
@@ -402,7 +419,9 @@ configuration and all job records.
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `curl` cannot reach `raw.githubusercontent.com` | A restricted network or a sandboxed shell | Ask the user to approve network access or to run the command; or build with `cargo install --git` |
-| `building from source needs Rust` | No release yet, and no `cargo` | Ask the user whether to install Rust from <https://rustup.rs>, then run the installer again |
+| `building from source needs Rust` | No prebuilt binary could be downloaded, and there is no `cargo` | Ask the user whether to install Rust from <https://rustup.rs>, then run the installer, or `hufu update`, again |
+| `hufu update`: `cannot write next to ...` | The program was installed by another user | Tell the user. Do not use `sudo`; they can run `hufu update` as that user |
+| `hufu update`: `downloads with curl ...` or `unpacks with tar ...` was not found | A minimal system, or Windows older than Windows 10 version 1803 | Run the install command from section 3 again instead |
 | The cargo build fails on the Rust version | Rust older than 1.89 | `rustup update stable`, then run the installer again |
 | `checksum mismatch` | A damaged or altered download | Stop and tell the user. Do not install the file |
 | `hufu: command not found` | The install directory is not on `PATH` | Use the full path; pass the printed `export PATH=...` line to the user |

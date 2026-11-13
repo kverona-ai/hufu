@@ -33,7 +33,8 @@ src/
 │   │                       process handling, time, JSON helpers. Depends on nothing of Hufu's
 │   ├── hufu-adapters/      codex_cli, agy_cli, cursor_cli, claude_cli, kimi_cli, pi, acp, external
 │   ├── hufu-core/          config, spec, submit, runner, slots, store, workspace, tally, schema,
-│   │                       capability (computer-use routing), mission, setup, doctor, ops
+│   │                       capability (computer-use routing), mission, setup, doctor, ops,
+│   │                       update (`hufu update`: manifest, checksum, replacing the program)
 │   ├── hufu-mcp/           the MCP server: protocol loop and tools
 │   ├── hufu-daemon/        the optional daemon
 │   ├── hufu-testing/       fake agents (one per adapter) and the adapter conformance suite
