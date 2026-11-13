@@ -167,10 +167,10 @@ flowchart LR
 |---|---|
 | 🐯 **Pluggable commander** | Advisor and executor are roles set in configuration, not code. The same agent can plan one mission and execute in the next |
 | 📜 **One task spec** | The same YAML drives Codex, Antigravity, Cursor, Kimi Code, Claude Code, pi and any ACP agent |
-| 👥 **Many executors, many accounts** | Any number of profiles, including several accounts of the same agent. Pools fail over or rotate between them |
+| 👥 **Many executors, many accounts** | Any number of profiles, including several accounts of the same agent. Pools fail over or rotate between them. [Who gets the work](#who-gets-the-work) |
 | 💾 **Jobs outlive sessions** | State, logs and results live on disk. Lose the session, keep the work |
 | 🔒 **Explicit permissions** | Three tiers, `read-only`, `workspace-write`, `full-access`, translated per agent. A tier an agent cannot honour is refused, never widened, and a read-only job that changed files is failed |
-| 🎚️ **Uniform reasoning effort** | One scale mapped to each agent's own control; an unmappable level is an error, not a silent skip |
+| 🎚️ **Model and effort per task** | Choose the model and the reasoning effort per task, per profile or as a default. One effort scale is mapped to each agent's own control; an unmappable level is an error, not a silent skip. [How to set them](#choose-the-model-and-the-effort) |
 | ✅ **Tally check** | Exit code `0` is not success. Acceptance checks decide whether work is accepted |
 | 🔌 **MCP in, ACP out** | Any agent that speaks MCP can drive Hufu and even configure it. Any agent that speaks ACP can be driven with a few lines of configuration |
 | 🖥️ **Computer use, routed** | A task can be granted desktop control. The work goes to a dedicated operator profile or to any executor that supports it, always behind an explicit grant |
@@ -259,9 +259,191 @@ connected agent then has 22 tools: dispatch and follow jobs, run missions, and r
 Hufu's configuration, including adding profiles and pools. "Add my second Codex account to Hufu
 and make a pool of both" is a sentence you can type into any of them.
 
+The next two sections show the two things people ask for most from inside an agent:
+[choosing the model and the effort](#choose-the-model-and-the-effort) of an executor, and
+[deciding which executor gets a task](#who-gets-the-work).
+
 An agent can also do the whole installation; that is the
 [recommended way to install](#let-your-agent-install-it), and the steps it follows are in the
 [agent install guide](doc/guide/agent-install.md).
+
+## Choose the model and the effort
+
+Every executor runs with a model and a reasoning effort. Each can be set in three places, and the
+first one that says something wins:
+
+| | Where | Applies to |
+|---|---|---|
+| 1 | **The task**: `model` and `effort` on `hufu_submit` (`-m` and `-e` on `hufu run`, `model:` and `effort:` in a task file) | That one job |
+| 2 | **The profile**: its `model` and `effort` | Every job of that profile |
+| 3 | **`defaults.effort`** in the configuration (effort only) | Everything else |
+
+When none of them says anything, the agent uses its own default model and effort.
+
+### From inside your agent
+
+This is the usual way. Say what you want to any agent that has Hufu connected (Claude Code, Codex,
+Cursor, ...), and it makes the tool call for you.
+
+**For one task.**
+
+> Have Codex review src/auth for race conditions. Use gpt-6.1-sol at high effort.
+
+```jsonc
+// hufu_submit
+{
+  "agent": "codex",
+  "prompt": "Review src/auth for race conditions. Give the file and line of each finding.",
+  "model": "gpt-6.1-sol",
+  "effort": "high"
+}
+```
+
+**For every task of one executor.** Give the combination a name, as a profile. Its description is
+what your agent, or the advisor of a mission, later reads when it picks an executor:
+
+> Add a Hufu profile "codex-deep": Codex with gpt-6.1-sol at max effort, for hard design and
+> debugging work.
+
+```jsonc
+// hufu_profile_set
+{
+  "name": "codex-deep",
+  "profile": {
+    "adapter": "codex-cli",
+    "model": "gpt-6.1-sol",
+    "effort": "max",
+    "description": "Hard design and debugging work"
+  }
+}
+```
+
+**As the default for everything.**
+
+> Make medium the default effort in Hufu.
+
+```jsonc
+// hufu_config_set
+{ "key": "defaults.effort", "value": "medium" }
+```
+
+To see what would be passed before anything runs, ask for a dry run ("show me the command first"):
+`hufu_submit` with `"dry_run": true` returns the exact command line and starts nothing. After a
+job, the `agent` block of `hufu_result` names the profile, model and effort that really ran.
+
+### The effort scale
+
+There is one scale for every agent: `off`, `low`, `medium`, `high`, `max`. `default` passes
+nothing and lets the agent decide, and `native:<value>` passes the agent's own value through, for
+example `native:xhigh` for Codex.
+
+| Agent | Levels it has | What Hufu passes for `high` | Model |
+|---|---|---|---|
+| Codex | `low` to `max` | `-c model_reasoning_effort="high"` | `-m <id>` |
+| Claude Code | `low` to `max` | `--effort high` | `--model <id>` |
+| Antigravity | `low` to `high` | `--effort high` | `--model <id>` |
+| Kimi Code | `low` to `max` | the variable `KIMI_MODEL_THINKING_EFFORT=high` | `-m <id>` |
+| pi | `off` to `max` | `--thinking high` | `--model <id>` |
+| Cursor | none | nothing: pick reasoning strength through the model id | `--model <id>` |
+| ACP agents | what the agent offers when the session opens | a session option | a session option |
+
+Two rules:
+
+- **A level an agent does not have is an error**, raised before anything starts. Set
+  `effort_fallback: nearest` on the profile, and Hufu uses the closest level the agent has and says
+  so in the job's warnings. `defaults.effort` is milder: for an agent without that level, the
+  agent's own default is used, with a warning.
+- **A model id is passed on as it is.** Hufu keeps no list of models; the agent decides whether
+  the id exists.
+
+### From the command line
+
+```console
+$ hufu run -a codex -m gpt-6.1-sol -e high "Review src/auth for race conditions"
+$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.1-sol --effort max \
+    --description "Hard design and debugging work"
+$ hufu profile set agy --effort-fallback nearest
+$ hufu config set defaults.effort medium
+$ hufu run -a codex -m gpt-6.1-sol -e high --dry-run "x"    # print the command line, start nothing
+```
+
+## Who gets the work
+
+With several executors configured, Hufu does not spread tasks over them by itself. **Every task
+names one profile or one pool**, and who writes that name depends on who is in command:
+
+| Who is in command | Who picks the executor | How |
+|---|---|---|
+| Your agent, one task at a time (`hufu_submit`) | Your agent | It reads `hufu_agents` (what each profile can do, its model, its description) and names a profile or a pool in `agent` |
+| A mission (`hufu_mission_start`) | The advisor | It is given the roster of executors and writes a plan in which every task names one of them. Hufu checks the plan, then runs it |
+| Either of them, when the name is a **pool** | Hufu | It picks one member of the pool by the pool's strategy |
+
+`hufu run` without `-a` goes to the first entry of `roles.executors`. `hufu_submit` always names
+its agent.
+
+**Dispatching task by task.** You stay in charge through your agent:
+
+> Have Codex fix the failing auth tests in a worktree, and at the same time have Antigravity
+> update the API docs. Tell me when both are done.
+
+Your agent makes two `hufu_submit` calls, one with `"agent": "codex"` and one with
+`"agent": "agy"`, each with `"permission": "workspace-write"` and `"isolation": "worktree"`, and
+then follows both with one `hufu_wait`.
+
+**Pools: interchangeable executors.** A pool is for profiles that can stand in for each other,
+typically several accounts of one agent.
+
+> Make a pool of my two Codex accounts that takes turns.
+
+```jsonc
+// hufu_pool_set
+{ "name": "codex-any", "members": ["codex", "codex-work"], "strategy": "round-robin" }
+```
+
+- At submission Hufu orders the members: `failover` keeps the listed order, `round-robin` starts
+  one member further with every job, `least-busy` puts the member with the fewest running jobs
+  first.
+- A member that cannot take the task as asked (a tier or an effort level it does not have) is left
+  out, with a warning. The first member left runs the job.
+- The job moves on to the next member only when the one running it is not installed, not logged in
+  or rate limited. Work the agent got wrong is not repeated on another account.
+- A `model` or `effort` named on the task goes with the job to whichever member runs it. Otherwise
+  each member uses its own.
+
+**Missions: the advisor assigns.**
+
+> Start a Hufu mission: migrate the HTTP client to async/await and keep the tests green. Claude
+> plans and reviews; codex-deep, codex-any and agy do the work.
+
+```jsonc
+// hufu_mission_start
+{
+  "goal": "Migrate the HTTP client from callbacks to async/await; keep the tests green",
+  "advisor": "claude",
+  "executors": ["codex-deep", "codex-any", "agy"]
+}
+```
+
+- The roster is `executors`, or `roles.executors` when it is left out. For each entry the advisor
+  sees its description, tiers, effort levels, model and account, and nothing outside the roster.
+- In the plan every task names one roster entry, and may set a permission tier and an effort
+  level. It cannot set a model: to let the advisor choose between models, make each model a
+  profile, like `codex-deep` above, and say in its description what it is good at.
+- Hufu validates the plan the way it validates `hufu run`. A plan that names an agent outside the
+  roster, or asks for something the chosen agent cannot do, goes back to the advisor once; a
+  second invalid plan fails the mission.
+- Tasks start in plan order as soon as the tasks they depend on are accepted, up to
+  `missions.max_parallel` at a time (default 1).
+- A task the advisor sends back for changes returns to the same executor, in the same session
+  where the agent can resume one. When a task fails, the tasks that depend on it are skipped.
+
+**Limits apply in every case.** At most `limits.max_concurrent_jobs` jobs run at once (default 4),
+and `limits.per_profile.<name>` caps one profile. A job over a limit waits as `queued`; it is not
+moved to another executor.
+
+More in the user guide: [pools](doc/guide/user-guide.md#pools),
+[model and effort](doc/guide/user-guide.md#model-and-effort) and
+[missions](doc/guide/user-guide.md#7-missions).
 
 ## Roadmap
 
