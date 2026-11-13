@@ -351,6 +351,87 @@ fn round_robin_pools_spread_jobs_over_accounts() {
 }
 
 #[test]
+fn model_and_effort_come_from_the_task_then_the_profile_then_the_default() {
+    let env = Env::new("effort");
+    env.config(json!({
+        "profiles": {"deep": {"adapter": "codex-cli", "command": fake("codex"), "model": "gpt-big", "effort": "max"}},
+        "defaults": {"effort": "medium"},
+    }));
+    let ran = |args: &[&str]| {
+        let (code, r) = env.run(args);
+        assert_eq!(code, 0, "{args:?}: {r}");
+        r
+    };
+    // The profile's own settings.
+    let r = ran(&["-a", "deep", "x"]);
+    assert_eq!((r["agent"]["model"].as_str(), r["agent"]["effort"].as_str()), (Some("gpt-big"), Some("max")));
+    // The task overrides the profile, for this job only.
+    let r = ran(&["-a", "deep", "-m", "gpt-small", "-e", "low", "[[fake:args]]"]);
+    assert_eq!((r["agent"]["model"].as_str(), r["agent"]["effort"].as_str()), (Some("gpt-small"), Some("low")));
+    let sent = r["final_message"].as_str().unwrap();
+    assert!(sent.contains("gpt-small") && sent.contains(r#"model_reasoning_effort=\"low\""#), "{sent}");
+    let shown = env.hufu(&["result", r["job"].as_str().unwrap()]).expect(0).stdout;
+    assert!(shown.contains("model gpt-small · effort low"), "{shown}");
+    // Neither says anything: the global default effort, and the agent's own model.
+    let r = ran(&["-a", "codex", "x"]);
+    assert_eq!(r["agent"]["effort"], "medium");
+    assert!(r["agent"]["model"].is_null(), "{r}");
+    // A default the agent has no level for is not an error: the agent's own default is used.
+    let r = ran(&["-a", "cursor", "x"]);
+    assert_eq!(r["agent"]["effort"], "default");
+    assert!(strings(&r["warnings"]).iter().any(|w| w.contains("default effort `medium`")), "{r}");
+
+    // A level asked for by name is refused, unless the profile accepts the nearest one.
+    let refused = env.hufu(&["run", "-a", "agy", "-e", "max", "x"]).expect(2);
+    assert!(refused.stderr.contains("effort_fallback: nearest"), "{}", refused.stderr);
+    assert!(env.hufu(&["profile", "set", "agy", "--effort-fallback", "closest"]).expect(2).stderr.contains("nearest"));
+    env.hufu(&["profile", "set", "agy", "--effort-fallback", "nearest"]).expect(0);
+    let r = ran(&["-a", "agy", "-e", "max", "x"]);
+    assert_eq!(r["agent"]["effort"], "high");
+    assert!(strings(&r["warnings"]).iter().any(|w| w.contains("nearest level `high`")), "{r}");
+}
+
+#[test]
+fn a_pool_leaves_out_members_that_cannot_take_the_task() {
+    let env = Env::new("pool-fit");
+    env.config(json!({
+        "profiles": {
+            "a1": {"adapter": "codex-cli", "command": fake("codex"), "model": "own-model"},
+            "a2": {"adapter": "codex-cli", "command": fake("codex")},
+            "out": {"adapter": "codex-cli", "command": fake("codex"), "vars": {"HUFU_FAKE_SCENARIO": "auth"}},
+        },
+        "pools": {
+            "mixed": {"members": ["cursor", "a1"]},
+            "spare": {"members": ["out", "a1"]},
+            "idle": {"members": ["a1", "a2"], "strategy": "least-busy"},
+        },
+    }));
+    // Cursor has no effort control, so a task that asks for a level goes to the next member.
+    let (code, r) = env.run(&["-a", "mixed", "-e", "high", "x"]);
+    assert_eq!(code, 0, "{r}");
+    assert_eq!((r["agent"]["profile"].as_str(), r["agent"]["effort"].as_str()), (Some("a1"), Some("high")));
+    assert_eq!(r["agent"]["model"], "own-model");
+    assert!(strings(&r["warnings"]).iter().any(|w| w.contains("pool member `cursor` cannot take this task")), "{r}");
+    // Without a level, the first member takes it.
+    assert_eq!(env.run(&["-a", "mixed", "x"]).1["agent"]["profile"], "cursor");
+    // No member can: refused before anything starts.
+    assert!(env.hufu(&["run", "-a", "mixed", "-e", "off", "x"]).expect(2).stderr.contains("no member of pool `mixed`"));
+
+    // A model named on the task goes with the job to whichever member runs it.
+    let (code, r) = env.run(&["-a", "spare", "-m", "task-model", "x"]);
+    assert_eq!(code, 0, "{r}");
+    assert_eq!((r["agent"]["profile"].as_str(), r["agent"]["model"].as_str()), (Some("a1"), Some("task-model")));
+
+    // least-busy: the member with fewer running jobs comes first.
+    let busy = env.start(&["-a", "idle", "[[fake:hang]]"]);
+    env.until(&busy, "running", |s| s["state"] == "running");
+    assert_eq!(env.state(&busy)["profile"], "a1");
+    assert_eq!(env.run(&["-a", "idle", "x"]).1["agent"]["profile"], "a2");
+    env.hufu(&["cancel", &busy]).expect(0);
+    assert_eq!(env.hufu(&["wait", &busy, "--timeout", "30s"]).code, 4);
+}
+
+#[test]
 fn each_account_gets_its_own_login_directory_and_credentials() {
     let mut env = Env::new("accounts");
     env.set("TEAM_KEY_B", "secret-b");

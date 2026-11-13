@@ -36,8 +36,8 @@ fn submit_schema() -> Value {
             "title": {"type": "string"},
             "cwd": {"type": "string", "description": "The workspace. Default: the directory the MCP server runs in."},
             "permission": {"type": "string", "enum": TIERS, "description": "Default read-only. full-access must be asked for explicitly."},
-            "effort": {"type": "string", "description": "default, off, low, medium, high, max, or native:<value>."},
-            "model": {"type": "string"},
+            "effort": {"type": "string", "description": "Reasoning effort for this job: default, off, low, medium, high, max, or native:<value>. Left out: the profile's effort, then defaults.effort. hufu_agents lists the levels each profile has; a level it lacks is an error."},
+            "model": {"type": "string", "description": "A model id for this job, passed to the agent as it is. Left out: the profile's model, then the agent's own default."},
             "timeout": {"type": "string", "description": "For example 30m or 2h."},
             "inactivity_timeout": {"type": "string"},
             "isolation": {"type": "string", "enum": ["none", "worktree"], "description": "worktree gives the job its own copy of the repository on a branch hufu/<job>."},
@@ -192,7 +192,7 @@ const TOOLS: &[Tool] = &[
     Tool {
         name: "hufu_profile_set",
         title: "Add or change a profile",
-        description: "Creates or updates an agent profile. Fields: adapter (codex-cli, agy-cli, cursor-cli, claude-cli, kimi-cli, pi, acp, external), model, provider, effort, permission, account (a label), home (the agent's own login directory, which is how two accounts of one agent are kept apart), env (names of variables to pass through), env_from ({AGENT_VAR: SHELL_VAR}), vars, command, description, provides ({computer_use: {via: native|lcu}}). Never put a secret value here.",
+        description: "Creates or updates an agent profile. Fields: adapter (codex-cli, agy-cli, cursor-cli, claude-cli, kimi-cli, pi, acp, external), model, provider, effort (the profile's default level), effort_fallback (nearest: use the closest level the agent has instead of refusing), permission, account (a label), home (the agent's own login directory, which is how two accounts of one agent are kept apart), env (names of variables to pass through), env_from ({AGENT_VAR: SHELL_VAR}), vars, command, description, provides ({computer_use: {via: native|lcu}}). Never put a secret value here.",
         schema: || {
             obj(
                 json!({"name": {"type": "string"}, "profile": {"type": "object"}, "merge": {"type": "boolean", "description": "Keep fields that are not named. Default true."}, "project": {"type": "boolean"}}),
