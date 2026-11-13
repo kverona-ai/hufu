@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Describes Hufu 0.1 as implemented. No release has been tagged yet, so the install scripts build from source until the first tag |
-| **Last updated** | 2026-11-13 (pointer to the agent install guide) |
+| **Last updated** | 2026-11-13 (`hufu update`, release workflow with a manifest and checks) |
 | **Related** | [Agent install guide](../guide/agent-install.md), [User guide](../guide/user-guide.md), [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
 
 Hufu is deployed on a developer's own machine, next to the agents it drives. There is no server to
@@ -94,7 +94,7 @@ What the install scripts do, and nothing more:
 | `--version <tag>` / `-Version` | `HUFU_VERSION` | A specific release instead of the latest |
 | `--dir <path>` / `-Dir` | `HUFU_INSTALL_DIR` | Where to put the binary |
 | `--from-source` / `-FromSource` | `HUFU_FROM_SOURCE=1` | Always build with cargo |
-| | `HUFU_DOWNLOAD_BASE` | A mirror that holds the release files, for networks that cannot reach GitHub |
+| | `HUFU_DOWNLOAD_BASE` | A mirror that holds the release files, for networks that cannot reach GitHub. `hufu update` reads it too |
 
 Options are passed to a piped script like this: `curl ... | sh -s -- --up --dir /opt/bin`.
 
@@ -219,8 +219,25 @@ Hufu does not install these units itself.
 | Stop a job | `hufu cancel <job>`; `--force` to skip the grace period |
 | Clean up old jobs | `hufu prune --older-than 30d`; add `--worktrees` for leftover worktrees |
 | Back up | Copy `~/.hufu/config.yaml`. Job data is disposable |
-| Upgrade | Run the install script again, then `hufu doctor`. Running jobs keep the binary they started with |
+| See whether a newer release exists | `hufu update --check` |
+| Upgrade | `hufu update`. It downloads and checks the newest release, replaces the program, restarts the daemon if one was running and runs `hufu doctor`. Running jobs keep the binary they started with |
+| Install a particular release, or go back to one | `hufu update --version v0.2.0` |
 | Uninstall | `hufu setup --remove`, `hufu daemon stop`, delete the `hufu` binary, then delete `~/.hufu` |
+
+**Updating.** `hufu update` is described in the
+[user guide](../guide/user-guide.md#updating). What matters for operations:
+
+- It needs `curl` or `wget`, and `tar`. Windows ships both since Windows 10 version 1803. Where
+  they are missing, running the install script again does the same job, without the restart of
+  the daemon and the checks.
+- It replaces the file it runs from, so it needs write access to that directory, as the user that
+  installed Hufu. It never asks for more rights.
+- Agents that have Hufu connected keep their old MCP server until they are restarted. Such a
+  server still starts jobs, and those jobs run with the new program.
+- A mirror for `HUFU_DOWNLOAD_BASE` holds the files of one release side by side:
+  `hufu-manifest.json`, the six archives and, for the install scripts, their `.sha256` files.
+  `hufu update` also accepts a local directory there.
+- With no release to download, it builds from source with cargo, like the install scripts.
 
 **Disk use.** A job directory holds the raw agent output, which can reach tens of megabytes for
 long runs. `retention` in the configuration bounds it (30 days and 2000 jobs by default); the
@@ -237,6 +254,9 @@ daemon prunes hourly, and `hufu prune` does it on demand.
 | Submission refused: tier not supported | The agent cannot enforce that tier headlessly | Use a supported tier with worktree isolation, or the agent's ACP profile |
 | Job shows `lost` | The runner was killed, or the machine slept or restarted | `hufu resume`, or run again. With the daemon and `--retry` this is automatic |
 | `hufu setup` did nothing for an agent | It was not found on `PATH` | `hufu setup --agent <name>`, or `--all` |
+| `hufu update`: `cannot write next to ...` | The program belongs to another user, or to a package manager | Run it as the user that installed Hufu, or run the install script again |
+| `hufu update`: `checksum mismatch` | A damaged download, or a mirror that mixes two releases | Nothing was changed. Try again; check the mirror |
+| `hufu update` starts a cargo build | No release with a binary for this platform was found | Expected before the first release and on unsupported platforms; otherwise check `HUFU_DOWNLOAD_BASE` |
 
 More in the [user guide](../guide/user-guide.md#15-troubleshooting).
 
@@ -253,16 +273,35 @@ Two workflows live in `.github/workflows/`.
 | Minimum Rust version | The workspace compiles with the version declared in `src/Cargo.toml` |
 | Install scripts | `shellcheck` on `install.sh`, a parse of `install.ps1` |
 
-**`release.yml`**, when a tag `vX.Y.Z` is pushed:
+**`release.yml`** releases the version that `src/Cargo.toml` states. It runs when it is started by
+hand from the Actions tab, when a tag `vX.Y.Z` is pushed, and as a dry run on every pull request
+that changes the workflow, the install scripts or the updater.
 
-1. Checks that the tag matches the version in `src/Cargo.toml`, and creates a draft release.
-2. Builds `hufu` for the six targets. The Linux binaries are static (musl) and linked with the
-   linker that ships with Rust, so one runner builds both architectures.
-3. Packs each binary with the READMEs and the licence, adds a SHA-256 file, uploads both.
-4. Publishes the release only after every target was built. The install scripts read from
-   `releases/latest`, so a half-built release is never served.
+| Job | What it does |
+|---|---|
+| Version and tag | Reads the version, derives the tag `v<version>`, and refuses a tag that does not match or a release that already exists |
+| Build (six targets) | Builds `hufu`, checks that the binary reports the version being released, and packs it with the READMEs and the licence. The Linux binaries are static (musl) and linked with the linker that ships with Rust, so one runner builds both architectures |
+| Manifest | Checks every SHA-256 file and writes `hufu-manifest.json`: the version, the tag and the sum of every archive. `hufu update` reads this file |
+| Check (Linux, macOS, Windows) | Installs the packed binary as a user would have it, lets `hufu update` read the release files and replace the program, runs the self-test, and runs `install.sh` against the same files |
+| Publish | Creates the release with every file at once. Skipped in a dry run |
+| Install the published release | Runs the real install scripts against the published release on all three systems, then `hufu update` |
 
-To release: set `version` in `src/Cargo.toml`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+Nothing is published before every target was built and checked, and the files of a release are
+uploaded to a draft that becomes visible only when all of them are there. The install scripts and
+`hufu update` read from `releases/latest`, so a half-built release is never served.
+
+**To release:**
+
+1. Set `version` in `src/Cargo.toml` (the workspace version and the six crate entries below it),
+   run `cargo build` so that `Cargo.lock` follows, and merge.
+2. In the Actions tab, run the **Release** workflow on `main`. Tick "dry run" first to see every
+   check pass without publishing. Pushing the tag `v<version>` starts the same release.
+
+**Pre-releases.** A version such as `0.1.0-alpha.1` is released the same way. Until the first
+stable release exists, a pre-release becomes the latest release, because there is nothing else for
+the install scripts and `hufu update` to serve. Once a stable release exists, pre-release versions
+are published as GitHub pre-releases: `latest` stays on the stable one, and a pre-release is
+installed by name with `hufu update --version <tag>`.
 
 Not automated, and open:
 

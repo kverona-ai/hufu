@@ -453,7 +453,20 @@ pub fn hufu_exe() -> Result<PathBuf> {
     if let Some(p) = std::env::var_os("HUFU_EXE").filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(p));
     }
-    std::env::current_exe().map_err(|e| HufuError::internal(format!("cannot find the hufu executable: {e}")))
+    let exe =
+        std::env::current_exe().map_err(|e| HufuError::internal(format!("cannot find the hufu executable: {e}")))?;
+    Ok(replaced_exe(&exe).unwrap_or(exe))
+}
+
+/// After an update replaced the program, Linux names the file of a process that is still running
+/// the old one `<path> (deleted)`. Such a process starts its helpers from the new program at the
+/// old path: a long-lived MCP server, daemon or mission driver keeps working across an update.
+fn replaced_exe(exe: &Path) -> Option<PathBuf> {
+    if exe.exists() {
+        return None;
+    }
+    let name = exe.file_name()?.to_str()?.strip_suffix(" (deleted)")?;
+    Some(exe.with_file_name(name)).filter(|p| p.is_file())
 }
 
 /// Starts a detached helper process of this binary (`__runner`, `__mission`, `daemon run`).

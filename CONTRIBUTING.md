@@ -53,6 +53,14 @@ step with the [agent install guide](doc/guide/agent-install.md).
 - A change that users can see updates the [user guide](doc/guide/user-guide.md) and, where it
   applies, both READMEs, in the same pull request.
 
+## Releasing
+
+A release is the version in `src/Cargo.toml`, built and published by the **Release** workflow. The
+steps, and what the workflow checks before it publishes, are in the
+[deployment guide](doc/deployment/deployment.md#10-release-and-distribution-for-maintainers).
+A pull request that changes the workflow, the install scripts or the updater runs the whole
+release as a dry run.
+
 ## Commit messages
 
 Use a short imperative subject with a type prefix, for example `docs: add adapter contract` or

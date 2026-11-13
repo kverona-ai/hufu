@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Describes Hufu 0.1 as implemented. The examples in it are checked by the test suite where they are files under `doc/examples/` |
-| **Last updated** | 2026-11-13 (pointer to the agent install guide) |
+| **Last updated** | 2026-11-13 (`hufu update`) |
 | **Related** | [Agent install guide](agent-install.md), [Deployment](../deployment/deployment.md), [Technical design](../technical/technical-design.md), [Adapter contract](../technical/adapter-contract.md) |
 
 Everything you can do with Hufu, from the first command to missions and computer use.
@@ -80,6 +80,55 @@ into the binary. It needs no account and no network, and it proves that backgrou
 enforcement and cancellation work on your machine.
 
 Other ways to install, and how to uninstall, are in the [deployment guide](../deployment/deployment.md).
+
+### Updating
+
+```console
+$ hufu update              # move to the newest release
+$ hufu update --check      # only say whether there is a newer one
+```
+
+`hufu update` replaces the installed program with the newest release:
+
+1. It reads the release's manifest, `hufu-manifest.json`, to learn the newest version. When that
+   is the installed one, it says so and stops.
+2. It downloads the archive for this platform and compares its SHA-256 sum with the manifest.
+3. It starts the new program once, to make sure that it runs on this machine and is the version
+   the release names.
+4. It puts the new program in the place of the old one, with a rename.
+5. It restarts the daemon if one was running, and runs `hufu doctor` with the new program.
+
+When step 1, 2 or 3 fails, nothing was changed, and the message says so.
+
+| Flag | Meaning |
+|---|---|
+| `--check` | Report the installed and the newest version. Nothing is downloaded or changed |
+| `--version <v>` | Install that release, written `v0.2.0` or `0.2.0`, instead of the newest one. This is also how to go back to an older release |
+| `--from-source` | Build with cargo instead of downloading: the main branch, or the tag given with `--version`. Needs Rust 1.89 or newer |
+| `--force` | Install even when that version is already installed |
+
+What an update leaves alone:
+
+- **Configuration and job records.** Only the program file changes.
+- **Running jobs.** They finish with the program they started with.
+- **Agents that have Hufu connected.** Each keeps its old MCP server until that agent is
+  restarted. Jobs it submits in the meantime already run with the new program. Restart the agent
+  to get new tools.
+
+When there is no release to download (none is published where Hufu looks, or it has no binary for
+this platform), `hufu update` builds from source with cargo instead and says that it does.
+
+The download uses `curl` (or `wget`) and `tar` from your system; Hufu checks the result itself.
+Windows has both since Windows 10 version 1803; on an older Windows, run the install script again
+instead. On a network that cannot reach GitHub, set `HUFU_DOWNLOAD_BASE` to a URL or a local
+directory that holds the files of one release, the manifest and the archives side by side.
+
+`hufu --json update --check` prints `current`, `latest`, `update_available` and `release_found`.
+`hufu --json update` prints `updated`, `from`, `to`, `method` (`release` or `source`), the state
+of the daemon and the `doctor` report. The exit code is `0` also when there was nothing to do, `1`
+when the download or a check failed, and `2` for a version that does not exist. When the update
+went in but `hufu doctor` then reports a problem, the document says `"updated": true,
+"doctor_ok": false` and the exit code is the one of `hufu doctor`.
 
 ## 2. The ideas in one minute
 
@@ -543,6 +592,10 @@ private.
 | `tier_violated` | A read-only job changed files. The changes are listed in the result |
 | A job stays `queued` | It waits for a free slot (`hufu status <job>` says so; see `limits`), for a job it depends on, or for the display |
 | `lost` | The runner process died, for example at a reboot. `hufu resume` or run it again; with the daemon and `--retry` this is automatic |
+| `hufu update` says `cannot write next to ...` | The program was installed by another user or by a package manager. Run the update as that user, or run the install script again |
+| `hufu update` says `checksum mismatch` | The download is damaged or is not what the release published. Nothing was changed. Try again; if it repeats, do not install the file |
+| `hufu update` builds from source, or says `building from source needs Rust` | There is no release with a binary for this platform where Hufu looked. Install Rust from <https://rustup.rs>, or check `HUFU_DOWNLOAD_BASE` |
+| After `hufu update`, an agent still shows the old tools | Its MCP server was started before the update. Restart that agent |
 | Nothing works | `hufu doctor`, then `hufu doctor --self-test` |
 
 ## 16. Known limits

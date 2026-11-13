@@ -10,3 +10,4 @@ mod daemon;
 mod jobs;
 mod mcp;
 mod missions;
+mod update;

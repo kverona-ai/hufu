@@ -12,6 +12,8 @@
 #
 # The script downloads one archive from the project's GitHub releases, checks its SHA-256 sum,
 # copies one file, hufu.exe, into the install directory and adds that directory to your user PATH.
+#
+# An installed Hufu updates itself: `hufu update`.
 
 param(
     [switch]$Up,
@@ -128,4 +130,5 @@ if ($Up) {
     }
 } else {
     Write-Host "Next: run ``hufu up`` to configure Hufu, register it with your agents and start the daemon."
+    Write-Host "Later, ``hufu update`` moves to the newest release."
 }

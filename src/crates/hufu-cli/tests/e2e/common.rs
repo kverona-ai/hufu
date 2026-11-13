@@ -142,7 +142,12 @@ impl Env {
     }
 
     pub fn command(&self, cwd: &Path) -> Command {
-        let mut cmd = Command::new(HUFU);
+        self.command_of(Path::new(HUFU), cwd)
+    }
+
+    /// Like [`Env::command`], for another copy of the program, such as an installed one.
+    pub fn command_of(&self, exe: &Path, cwd: &Path) -> Command {
+        let mut cmd = Command::new(exe);
         cmd.current_dir(cwd)
             .env("HUFU_HOME", &self.home)
             .env("HUFU_KILL_GRACE_MS", "300")

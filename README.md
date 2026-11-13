@@ -24,8 +24,9 @@ task spec, one set of commands and one result format, whichever agents are on ei
 > **Status: 0.1, pre-release.** Everything described here is implemented and tested end to end on
 > Linux, macOS and Windows against built-in fake agents, one per adapter. The adapters were written
 > from each agent's current documentation and have **not** yet been exercised against real agent
-> accounts by this project's CI, so expect first-contact issues and please report them. No release
-> has been tagged yet; until then the installer builds from source.
+> accounts by this project's CI, so expect first-contact issues and please report them. Releases
+> are pre-releases (`0.1.0-alpha.N`) for the same reason. They come with prebuilt binaries for six
+> platforms; where none can be downloaded, the installer builds from source.
 
 ## Why
 
@@ -102,6 +103,20 @@ agent installed it stops at step 1 and says what to install.
 
 Prefer to build it yourself? `cargo install --git https://github.com/kverona-ai/hufu hufu-cli --locked`
 (Rust 1.89 or newer). More ways to install: [deployment guide](doc/deployment/deployment.md).
+
+### Keep it up to date
+
+```console
+$ hufu update            # move to the newest release
+$ hufu update --check    # only say whether there is a newer one
+```
+
+`hufu update` downloads the newest release, checks its SHA-256 sum, makes sure the new program
+starts, and only then replaces the old one. It restarts the daemon if one was running and ends with
+`hufu doctor`. Running jobs finish with the version they started with, and your configuration and
+job records are not touched. `--version v0.2.0` installs a particular release, which is also the
+way back to an older one. Or ask your agent: "update Hufu". Afterwards, restart the agents that
+have Hufu connected, so that they pick up the new version.
 
 ## How it works
 
@@ -258,7 +273,8 @@ An agent can also do the whole installation; that is the
 | **M3** | Pluggable commander: missions, tally checks, budgets | ✅ Implemented |
 | **M4** | Always on: daemon, limits, account pools, MCP server | ✅ Implemented |
 | **M5** | Beyond the workspace: computer-use routing | ✅ Implemented |
-| **Next** | Verification against real agent accounts, first tagged release | ⚪ Open |
+| **Since M5** | Self-update (`hufu update`) and releases with prebuilt binaries for six platforms | ✅ Implemented |
+| **Next** | Verification against real agent accounts, first stable release | ⚪ Open |
 
 Details: [doc/roadmap.md](doc/roadmap.md).
 
@@ -291,7 +307,7 @@ hufu/
 ├── llms.txt             the same as an index of links, for agents and crawlers
 ├── CONTRIBUTING.md
 ├── LICENSE              Apache-2.0
-├── .github/workflows/   CI on Linux, macOS and Windows; release builds
+├── .github/workflows/   CI on Linux, macOS and Windows; the release workflow
 ├── doc/                 every document: requirements, research, architecture,
 │                        technical design, user guide, deployment, decision records, examples
 └── src/                 every line of code: a Cargo workspace with its tests,

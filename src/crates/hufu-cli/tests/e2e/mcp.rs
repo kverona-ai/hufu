@@ -17,8 +17,12 @@ pub struct Host {
 
 impl Host {
     pub fn start(env: &Env, args: &[&str]) -> Host {
-        let mut child = env
-            .command(&env.work)
+        Host::start_with(env.command(&env.work), args)
+    }
+
+    /// Starts the server from a prepared command, for example one of an installed copy.
+    pub fn start_with(mut command: std::process::Command, args: &[&str]) -> Host {
+        let mut child = command
             .arg("mcp")
             .args(args)
             .stdin(Stdio::piped())

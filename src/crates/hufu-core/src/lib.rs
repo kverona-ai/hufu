@@ -15,6 +15,7 @@ pub mod spec;
 pub mod store;
 pub mod submit;
 pub mod tally;
+pub mod update;
 pub mod workspace;
 
 pub use config::Home;

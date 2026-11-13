@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
     name = "hufu",
     version,
     about = "Hufu: dispatch work to any coding agent. Any agent holds the tally, any agent does the work.",
-    after_help = "Start here:\n  hufu up                      one-command setup: configure, register with your agents, start the daemon\n  hufu agents                  see what is available\n  hufu run -a codex \"...\"      hand off a task\n\nExit codes: 0 ok, 1 internal, 2 usage, 3 job failed, 4 cancelled, 5 timed out, 6 wait timed out,\n7 lost, 8 rejected by the tally check, 10 agent unavailable or not logged in."
+    after_help = "Start here:\n  hufu up                      one-command setup: configure, register with your agents, start the daemon\n  hufu agents                  see what is available\n  hufu run -a codex \"...\"      hand off a task\n  hufu update                  move to the newest release\n\nExit codes: 0 ok, 1 internal, 2 usage, 3 job failed, 4 cancelled, 5 timed out, 6 wait timed out,\n7 lost, 8 rejected by the tally check, 10 agent unavailable or not logged in."
 )]
 pub struct Cli {
     /// Print machine-readable JSON (every document carries `"v": 1`).
@@ -58,6 +58,8 @@ pub enum Command {
     Up(UpArgs),
     /// Register Hufu's MCP server with other agents so that they can dispatch through it.
     Setup(SetupArgs),
+    /// Update Hufu itself to the newest release, restart the daemon and run the checks.
+    Update(UpdateArgs),
     /// Read and change configuration.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -71,6 +73,8 @@ pub enum Command {
     Runner { job: String },
     #[command(name = "__mission", hide = true)]
     MissionDriver { mission: String },
+    #[command(name = "__sweep", hide = true)]
+    Sweep { exe: PathBuf, known: Vec<String> },
 }
 
 #[derive(Args, Debug, Default)]
@@ -366,6 +370,22 @@ pub struct SetupArgs {
     /// Register for the current project only, where the agent supports it.
     #[arg(long)]
     pub project: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct UpdateArgs {
+    /// Only report whether a newer release exists. Nothing is downloaded or changed.
+    #[arg(long, conflicts_with_all = ["from_source", "force"])]
+    pub check: bool,
+    /// Install this release, for example v0.1.0, instead of the newest one. An older one works too.
+    #[arg(long = "version", value_name = "VERSION")]
+    pub version: Option<String>,
+    /// Build with cargo instead of downloading a binary: the main branch, or the tag given with --version.
+    #[arg(long = "from-source")]
+    pub from_source: bool,
+    /// Install again even when that version is already installed.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Subcommand, Debug)]

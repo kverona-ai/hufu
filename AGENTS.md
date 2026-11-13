@@ -24,8 +24,8 @@ Follow **[doc/guide/agent-install.md](doc/guide/agent-install.md)** from top to 
    $env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.ps1 | iex
    ```
 
-   Until the first release is tagged the installer builds from source, which needs Rust 1.89 or
-   newer and takes a minute or more.
+   Where no prebuilt binary can be downloaded the installer builds from source, which needs Rust
+   1.89 or newer and takes a minute or more.
 3. Run `hufu --json doctor` and act on its `hints`. `hufu doctor --self-test` proves that jobs run,
    without any account. If a hint says `only one agent is in use`, tell the user: that agent is
    both the advisor and the only executor, and a second agent or account is worth adding.
@@ -37,6 +37,15 @@ Follow **[doc/guide/agent-install.md](doc/guide/agent-install.md)** from top to 
 
 Never log an agent in for the user, never write an API key into a file or onto a command line (the
 configuration holds the names of environment variables, never their values), and do not use `sudo`.
+
+## You were asked to update Hufu
+
+Run `hufu --json update` (or `hufu --json update --check` to only look). It downloads the newest
+release, checks it, replaces the program, restarts the daemon if one was running and runs
+`hufu doctor`; the result says `updated`, `from`, `to` and `doctor_ok`. Afterwards tell the user to
+restart their agent, whose MCP server is the old program until then. Details and the fallback for
+an installation too old to have the command:
+[doc/guide/agent-install.md, section 10](doc/guide/agent-install.md#10-upgrade-and-uninstall).
 
 ## You are using Hufu to dispatch work
 

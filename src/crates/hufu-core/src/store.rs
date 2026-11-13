@@ -233,7 +233,7 @@ pub struct JobResult {
 // File primitives
 // ---------------------------------------------------------------------------------------------
 
-fn retry<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+pub(crate) fn retry<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
     // On Windows a rename or read can briefly collide with another process holding the file.
     let mut last = None;
     for attempt in 0..8 {

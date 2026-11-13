@@ -23,8 +23,9 @@ advisor，任意其他 Agent 都可以被派去执行任务。无论两端是哪
 > [!NOTE]
 > **当前状态：0.1 预发布。** 本文描述的功能都已实现，并在 Linux、macOS、Windows 三个平台上用内置的
 > 模拟 Agent（每种适配器一个）做了端到端测试。各适配器是按各 Agent 的最新文档编写的，本项目的 CI
-> **还没有**用真实账号跑过，首次对接真实 Agent 时可能遇到问题，欢迎反馈。目前还没有打过发布标签，
-> 在此之前安装脚本会从源码构建。
+> **还没有**用真实账号跑过，首次对接真实 Agent 时可能遇到问题，欢迎反馈。出于同样的原因，目前发布的
+> 都是预发布版本（`0.1.0-alpha.N`）。每个版本都带有六个平台的预编译程序；下载不到时，安装脚本会改为
+> 从源码构建。
 
 ## 为什么要做
 
@@ -98,6 +99,18 @@ $env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/s
 
 想自己编译：`cargo install --git https://github.com/kverona-ai/hufu hufu-cli --locked`（需要 Rust 1.89
 或更新版本）。更多安装方式见[部署文档](doc/deployment/deployment.md)。
+
+### 保持更新
+
+```console
+$ hufu update            # 更新到最新版本
+$ hufu update --check    # 只检查有没有新版本
+```
+
+`hufu update` 会下载最新版本，核对 SHA-256 校验和，确认新程序能在本机启动，然后才替换旧程序。如果
+守护进程原本在运行，它会重启守护进程，最后运行一遍 `hufu doctor`。正在运行的作业继续用它们启动时的
+版本跑完，配置和作业记录都不会被改动。`--version v0.2.0` 安装指定版本，想退回旧版本也用它。也可以
+直接对你的 Agent 说"更新 Hufu"。更新之后，重启已接入虎符的 Agent，它们才会用上新版本。
 
 ## 工作方式
 
@@ -248,7 +261,8 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 | **M3** | 可插拔的指挥者：mission、合符检查、预算 | ✅ 已实现 |
 | **M4** | 常驻运行：守护进程、并发限制、账号池、MCP 服务 | ✅ 已实现 |
 | **M5** | 工作区之外：computer use 路由 | ✅ 已实现 |
-| **下一步** | 用真实 Agent 账号做验证，打第一个发布标签 | ⚪ 待办 |
+| **M5 之后** | 自更新（`hufu update`），以及带六个平台预编译程序的版本发布 | ✅ 已实现 |
+| **下一步** | 用真实 Agent 账号做验证，发布第一个正式版本 | ⚪ 待办 |
 
 详见 [doc/roadmap.md](doc/roadmap.md)。
 
@@ -283,7 +297,7 @@ hufu/
 ├── llms.txt             同样的内容，以链接索引的形式提供给 Agent 和爬虫
 ├── CONTRIBUTING.md
 ├── LICENSE              Apache-2.0
-├── .github/workflows/   Linux、macOS、Windows 三平台 CI；发布构建
+├── .github/workflows/   Linux、macOS、Windows 三平台 CI；发布流程
 ├── doc/                 所有文档：需求、调研、架构、技术设计、用户指南、部署、决策记录、示例
 └── src/                 所有代码：Cargo workspace 及其测试、安装脚本、各 Agent 的集成文件
 ```

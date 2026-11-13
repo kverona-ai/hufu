@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | M0 to M5 are implemented in Hufu 0.1. What remains is verification against real agents and the first release |
-| **Last updated** | 2026-11-12 (all milestones implemented in one step, on Linux, macOS and Windows) |
+| **Status** | M0 to M5 are implemented in Hufu 0.1, and Hufu can update itself from published releases. What remains is verification against real agents and the first stable release |
+| **Last updated** | 2026-11-13 (`hufu update`; releases with prebuilt binaries, as pre-releases for now) |
 | **Related** | [Requirements](requirements/requirements.md), [Architecture](architecture/architecture.md), [User guide](guide/user-guide.md) |
 
 The milestones were planned so that each would be useful on its own. The project owner then asked
@@ -134,6 +134,19 @@ through a dedicated operator, with only configuration changed; the tests show th
 operator. *Open:* the same on a real desktop. LCU, the reference runtime, needs macOS on Apple
 silicon, which no test machine of this project has.
 
+## After M5: updates and releases
+
+**State: implemented.**
+
+| Delivered | Notes |
+|---|---|
+| `hufu update`, with `--check`, `--version`, `--from-source` and `--force` | Downloads a release, checks its SHA-256 sum, makes sure the new program starts, replaces the old one, restarts the daemon and runs `hufu doctor`. [ADR-0013](adr/0013-self-update-with-system-tools.md) |
+| Releases with prebuilt binaries for six targets, their checksums and `hufu-manifest.json` | One workflow, started by hand or by a tag. Every release is checked on Linux, macOS and Windows before and after it is published |
+| A dry run of the whole release on pull requests that touch it | The release path is tested before a release depends on it |
+
+Versions are pre-releases (`0.1.0-alpha.N`) until live verification, below, is done: the binaries
+are real, the adapters have not met real agents yet.
+
 ## Next
 
 In order:
@@ -141,8 +154,8 @@ In order:
 1. **Live verification.** Run each adapter against the real agent on a machine that has the
    logins: one read-only job, one writing job, one cancel, one resume. Record the agent version in
    the [agent landscape](research/agent-landscape.md) and fix what differs from the documentation.
-2. **First release.** Tag `v0.1.0`; the release workflow builds and publishes the binaries, and the
-   install scripts start serving them.
+2. **First stable release.** Set the version to `0.1.0` and run the release workflow. Until then
+   the install scripts and `hufu update` serve the newest pre-release.
 3. **Distribution channels.** crates.io, a Homebrew tap, an npm installer. Each needs an account or
    a name reserved by the maintainers.
 4. **Computer use on a real desktop.** With LCU on Apple silicon, and with one agent's native

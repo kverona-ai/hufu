@@ -61,6 +61,7 @@ src/
 │   │       ├── mission     # advisor loop, plan and verdict handling, budgets
 │   │       ├── setup       # registering with host agents
 │   │       ├── doctor      # health check and self-test
+│   │       ├── update      # `hufu update`: release manifest, SHA-256, replacing the program
 │   │       └── ops         # configuration edits and pruning shared by CLI and MCP
 │   ├── hufu-mcp/           # MCP server
 │   ├── hufu-daemon/        # optional daemon
@@ -657,10 +658,21 @@ The daemon is optional and stateless: everything it knows is in the job store.
   jobs against the fakes in a temporary home: a background job, an ACP job with a permission
   decision, and a cancel that must leave no process behind.
 
+- **`hufu update`** ([ADR-0013](../adr/0013-self-update-with-system-tools.md)) reads
+  `hufu-manifest.json` of the newest or the named release, downloads the archive for the platform
+  with the system's `curl` or `wget`, checks its SHA-256 sum with code of its own, unpacks it with
+  the system's `tar`, and starts the new program once to see that it runs and reports the expected
+  version. Only then is the program replaced, by a rename; on Windows the running program is
+  renamed aside first and removed later by a short-lived helper. The daemon is restarted if one
+  was running, and `doctor` is run by the new program. With no release to download it builds with
+  `cargo install` into a scratch directory and installs the result the same way. A process that
+  still runs the old program starts its runners from the new one.
+
 ## 16. Versioning
 
 - The configuration, the task spec and every JSON output carry `version` or `v`, currently `1`.
 - The CLI follows semantic versioning from 1.0. Before that, breaking changes are listed in the
-  release notes.
+  release notes. `hufu update` orders versions as Semantic Versioning does, so `0.1.0-alpha.2`
+  comes before `0.1.0-rc.1`, and both come before `0.1.0`.
 - The agent version an adapter saw is recorded in each job's state and result, so a report about a
   misbehaving agent always says which version it was.

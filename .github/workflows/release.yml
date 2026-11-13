@@ -1,47 +1,92 @@
 name: Release
 
-# Pushing a tag `vX.Y.Z` builds Hufu for every supported platform and publishes a GitHub release.
-# The install scripts in src/install download from the latest published release.
+# Builds Hufu for every supported platform and publishes a GitHub release: one archive per
+# platform, each with its SHA-256 sum, `hufu-manifest.json` (the version and every checksum, read
+# by `hufu update`) and the install scripts.
+#
+# It releases the version that src/Cargo.toml states. Three ways to start it:
+#   - "Run workflow" in the Actions tab, on main: creates the tag `v<version>` and publishes.
+#     With "dry run" ticked it builds and checks everything and publishes nothing.
+#   - Pushing a tag `v<version>`: publishes that tag.
+#   - A pull request that changes this file, the install scripts or the updater: always a dry run.
+#
+# Until the first stable release exists, a pre-release version (`0.1.0-rc.1`) becomes the latest
+# release, because there is nothing else to install. After that, pre-release versions are
+# published as GitHub pre-releases and are installed by name: `hufu update --version <tag>`.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build and check everything, publish nothing"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "src/install/**"
+      - "src/crates/hufu-core/src/update.rs"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  GH_TOKEN: ${{ github.token }}
-  TAG: ${{ github.ref_name }}
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  draft:
-    name: Draft the release
+  prepare:
+    name: Version and tag
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: The tag must match the version in src/Cargo.toml
+      - name: Read the version and decide whether to publish
+        id: version
         run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' src/Cargo.toml)
-          if [ "v$version" != "$TAG" ]; then
-            echo "::error::tag $TAG does not match version $version in src/Cargo.toml"
+          tag="v$version"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::src/Cargo.toml states version '$version', which is not a version"
             exit 1
           fi
-      - name: Create the draft
-        run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --verify-tag --title "Hufu $TAG" --generate-notes
+          publish=true
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
+            publish=false
           fi
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" != "$tag" ]; then
+            echo "::error::tag ${{ github.ref_name }} does not match version $version in src/Cargo.toml"
+            exit 1
+          fi
+          if [ "$publish" = "true" ] && gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release $tag already exists. Raise the version in src/Cargo.toml first"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Hufu $version ($tag), publish: $publish" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Build ${{ matrix.target }}
-    needs: draft
+    needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -49,11 +94,12 @@ jobs:
         include:
           # Linux binaries are static (musl) and linked with the linker that ships with Rust,
           # so one runner builds both architectures and the result runs on any distribution.
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, linker: rust-lld }
+          # `runs` marks the targets whose binary the runner itself can start.
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, linker: rust-lld, runs: true }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, linker: rust-lld }
-          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: aarch64-apple-darwin, runs: true }
           - { os: macos-latest, target: x86_64-apple-darwin }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, runs: true }
           - { os: windows-latest, target: aarch64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +116,12 @@ jobs:
             export "CARGO_TARGET_${name}_LINKER=${{ matrix.linker }}"
           fi
           cargo build --release --locked -p hufu-cli --target "${{ matrix.target }}"
+      - name: The binary reports the version being released
+        if: matrix.runs
+        run: |
+          got=$("src/target/${{ matrix.target }}/release/hufu" --version)
+          echo "$got"
+          [ "$got" = "hufu ${{ needs.prepare.outputs.version }}" ]
       - name: Package
         run: |
           target="${{ matrix.target }}"
@@ -96,16 +148,176 @@ jobs:
             shasum -a 256 "$asset" > "$asset.sha256"
           fi
           cat "$asset.sha256"
-      - name: Upload
-        run: gh release upload "$TAG" dist/* --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
 
-  publish:
-    name: Publish the release
-    needs: build
+  assemble:
+    name: Manifest
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Add the install scripts and publish
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Check the sums and write hufu-manifest.json
+        working-directory: dist
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          gh release upload "$TAG" src/install/install.sh src/install/install.ps1 --clobber
-          gh release edit "$TAG" --draft=false --latest
+          count=$(ls hufu-*.tar.gz hufu-*.zip | wc -l)
+          if [ "$count" -ne 6 ]; then
+            echo "::error::expected 6 archives, found $count"
+            exit 1
+          fi
+          cat ./*.sha256 | sha256sum --check --strict
+          jq -n --arg version "$VERSION" --arg tag "$TAG" '{v: 1, version: $version, tag: $tag, assets: {}}' > manifest.json
+          for asset in hufu-*.tar.gz hufu-*.zip; do
+            sum=$(cut -d' ' -f1 "$asset.sha256")
+            size=$(wc -c < "$asset")
+            jq --arg name "$asset" --arg sum "$sum" --argjson size "$size" \
+              '.assets[$name] = {sha256: $sum, size: $size}' manifest.json > manifest.next
+            mv manifest.next manifest.json
+          done
+          mv manifest.json hufu-manifest.json
+          cp ../src/install/install.sh ../src/install/install.ps1 .
+          cat hufu-manifest.json
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  check:
+    name: Check on ${{ matrix.os }}
+    needs: [prepare, assemble]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: dist
+      - name: Unpack the archive as a user would have it installed
+        run: |
+          mkdir -p "$RUNNER_TEMP/unpacked" "$RUNNER_TEMP/installed"
+          case "$TARGET" in
+            *windows*) unzip -q "dist/hufu-$TARGET.zip" -d "$RUNNER_TEMP/unpacked" ;;
+            *) tar -xzf "dist/hufu-$TARGET.tar.gz" -C "$RUNNER_TEMP/unpacked" ;;
+          esac
+          cp "$RUNNER_TEMP/unpacked/hufu-$TARGET"/hufu* "$RUNNER_TEMP/installed/"
+          got=$("$RUNNER_TEMP/installed/hufu" --version)
+          echo "$got"
+          [ "$got" = "hufu $VERSION" ]
+      - name: hufu update reads the release files and replaces the program
+        env:
+          # A native path on every platform: the program is not a shell.
+          HUFU_DOWNLOAD_BASE: ${{ github.workspace }}/dist
+          HUFU_HOME: ${{ runner.temp }}/hufu-home
+        run: |
+          hufu="$RUNNER_TEMP/installed/hufu"
+          "$hufu" --json update --check | tee check.json
+          grep -q "\"latest\":\"$VERSION\"" check.json
+          grep -q '"update_available":false' check.json
+          grep -q '"binary":true' check.json
+          "$hufu" update --force
+          [ "$("$hufu" --version)" = "hufu $VERSION" ]
+      - name: Self-test of the released binary
+        env:
+          HUFU_HOME: ${{ runner.temp }}/hufu-home
+        run: |
+          "$RUNNER_TEMP/installed/hufu" doctor --self-test
+      - name: install.sh installs from the release files
+        if: runner.os != 'Windows'
+        run: |
+          HUFU_DOWNLOAD_BASE="file://$PWD/dist" sh dist/install.sh --dir "$RUNNER_TEMP/by-script"
+          [ "$("$RUNNER_TEMP/by-script/hufu" --version)" = "hufu $VERSION" ]
+
+  publish:
+    name: Publish the release
+    needs: [prepare, check]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: dist
+      - name: Create the release with every file
+        run: |
+          stable=$(gh release list --exclude-drafts --limit 200 --json tagName \
+            --jq '[.[] | select(.tagName | contains("-") | not)] | length')
+          channel="--latest"
+          title="Hufu $TAG"
+          case "$VERSION" in
+            *-*)
+              title="Hufu $TAG (pre-release)"
+              if [ "$stable" -gt 0 ]; then channel="--prerelease"; fi
+              ;;
+          esac
+          # gh uploads the files to a draft and publishes it only when all of them are there.
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$title" --generate-notes $channel
+
+  verify:
+    name: Install the published release
+    needs: [prepare, publish]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors "$BASE/install.sh" | sh -s -- --version "$TAG" --dir "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:HUFU_VERSION = $env:TAG
+          $env:HUFU_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "bin"
+          Invoke-RestMethod "$env:BASE/install.ps1" | Invoke-Expression
+          Add-Content $env:GITHUB_PATH $env:HUFU_INSTALL_DIR
+      - name: The installed program is the release, and hufu update finds it
+        env:
+          HUFU_HOME: ${{ runner.temp }}/hufu-home
+        run: |
+          [ "$(hufu --version)" = "hufu $VERSION" ]
+          hufu --json update --check --version "$TAG" | tee check.json
+          grep -q "\"latest\":\"$VERSION\"" check.json
+          grep -q '"binary":true' check.json
+          hufu update --check
+          hufu update --force --version "$TAG"
+          [ "$(hufu --version)" = "hufu $VERSION" ]
