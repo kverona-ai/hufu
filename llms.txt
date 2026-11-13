@@ -1,0 +1,33 @@
+# Hufu
+
+> Hufu is a local multi-agent dispatch layer with a pluggable commander: one self-contained
+> program, `hufu`, that lets any coding agent hand work to any other coding agent (Codex,
+> Antigravity, Cursor, Kimi Code, Claude Code, pi, any ACP agent) as background jobs, and lets any
+> agent that speaks MCP drive and configure it. It runs on the user's own machine; there is no
+> server and no account.
+
+To install Hufu for a user, follow the agent install guide. The short version: at least one agent
+program must already be installed and logged in; run
+`curl -fsSL https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.sh | sh -s -- --up`
+(Windows PowerShell: `$env:HUFU_UP = "1"; irm https://raw.githubusercontent.com/kverona-ai/hufu/main/src/install/install.ps1 | iex`);
+check with `hufu --json doctor`; ask the user to restart their agent so that the `hufu_*` MCP tools
+appear. API keys stay in the user's environment; the configuration holds only variable names.
+
+## Install and configure
+
+- [Agent install guide](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/guide/agent-install.md): step-by-step install, setup, configuration and checks, written for an agent to carry out
+- [AGENTS.md](https://raw.githubusercontent.com/kverona-ai/hufu/main/AGENTS.md): where an agent should go, by task
+- [Deployment](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/deployment/deployment.md): every install channel, host registration, run modes, operations, troubleshooting
+
+## Use
+
+- [User guide](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/guide/user-guide.md): every command, the configuration reference, the MCP tools, exit codes
+- [Sample configuration](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/examples/config.yaml): a complete, commented `config.yaml`
+- [Claude Code skill](https://raw.githubusercontent.com/kverona-ai/hufu/main/src/integrations/claude-code/SKILL.md): when and how a host agent delegates through Hufu
+
+## Optional
+
+- [README](https://raw.githubusercontent.com/kverona-ai/hufu/main/README.md): overview, key ideas, supported agents, roadmap
+- [Architecture](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/architecture/architecture.md): components, roles, job and mission lifecycles, security model
+- [Adapter contract](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/technical/adapter-contract.md): how each agent is driven; permission and effort mapping
+- [Roadmap](https://raw.githubusercontent.com/kverona-ai/hufu/main/doc/roadmap.md): what is built, what is not verified yet

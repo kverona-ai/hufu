@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Describes Hufu 0.1 as implemented. No release has been tagged yet, so the install scripts build from source until the first tag |
-| **Last updated** | 2026-11-12 (install scripts, `hufu up`, three platforms, release workflow) |
-| **Related** | [User guide](../guide/user-guide.md), [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
+| **Last updated** | 2026-11-13 (pointer to the agent install guide) |
+| **Related** | [Agent install guide](../guide/agent-install.md), [User guide](../guide/user-guide.md), [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
 
 Hufu is deployed on a developer's own machine, next to the agents it drives. There is no server to
 host. "Deployment" means: install the one binary, point it at the agents already installed, connect
@@ -67,6 +67,10 @@ Hufu's.
 ## 3. Install
 
 The package is `hufu-cli`; the command is `hufu`.
+
+Most installations are done by an agent on the user's behalf. The steps it follows, with the
+checks to make after each one, are in the [agent install guide](../guide/agent-install.md). The
+channels are the same either way:
 
 | Channel | Command | Notes |
 |---|---|---|

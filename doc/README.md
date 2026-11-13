@@ -6,7 +6,8 @@ All project documents live in this directory. Code lives in [`src/`](../src/READ
 
 | If you want to know… | Read |
 |---|---|
-| How to install and use it | [User guide](guide/user-guide.md) |
+| How to have your agent install it (the main way) | [Agent install guide](guide/agent-install.md) |
+| How to install and use it yourself | [User guide](guide/user-guide.md) |
 | What Hufu is for and what it must do | [Requirements](requirements/requirements.md) |
 | How the system is put together | [Architecture](architecture/architecture.md) |
 | What is built and what is next | [Roadmap](roadmap.md) |
@@ -18,6 +19,7 @@ doc/
 ├── README.md                     this index
 ├── roadmap.md                    milestones M0 to M5 and what comes next
 ├── guide/
+│   ├── agent-install.md          the steps an agent follows to install and configure Hufu
 │   └── user-guide.md             every command, configuration reference, MCP tools, recipes
 ├── requirements/
 │   └── requirements.md           goals, users, scenarios, FR and NFR lists, open questions
@@ -41,6 +43,9 @@ doc/
 ## By category
 
 ### Using Hufu
+- [Agent install guide](guide/agent-install.md): written for a coding agent that was asked to
+  install or configure Hufu. [`AGENTS.md`](../AGENTS.md) and [`llms.txt`](../llms.txt) in the
+  repository root point to it
 - [User guide](guide/user-guide.md)
 
 ### Requirements
