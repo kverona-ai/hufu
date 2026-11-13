@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented. No release has been tagged yet, so the install scripts build from source until the first tag |
+| **Status** | Describes Hufu 0.1 as implemented. Releases are published as pre-releases (`0.1.0-alpha.N`, the first is `v0.1.0-alpha.1`) with prebuilt binaries; the install scripts and `hufu update` download them and build from source only when no binary fits |
 | **Last updated** | 2026-11-13 (`hufu update`, release workflow with a manifest and checks) |
 | **Related** | [Agent install guide](../guide/agent-install.md), [User guide](../guide/user-guide.md), [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
 
@@ -256,7 +256,7 @@ daemon prunes hourly, and `hufu prune` does it on demand.
 | `hufu setup` did nothing for an agent | It was not found on `PATH` | `hufu setup --agent <name>`, or `--all` |
 | `hufu update`: `cannot write next to ...` | The program belongs to another user, or to a package manager | Run it as the user that installed Hufu, or run the install script again |
 | `hufu update`: `checksum mismatch` | A damaged download, or a mirror that mixes two releases | Nothing was changed. Try again; check the mirror |
-| `hufu update` starts a cargo build | No release with a binary for this platform was found | Expected before the first release and on unsupported platforms; otherwise check `HUFU_DOWNLOAD_BASE` |
+| `hufu update` starts a cargo build | No release with a binary for this platform was found | Expected on unsupported platforms and with a mirror that has no release; otherwise check `HUFU_DOWNLOAD_BASE` and that GitHub can be reached |
 
 More in the [user guide](../guide/user-guide.md#15-troubleshooting).
 
