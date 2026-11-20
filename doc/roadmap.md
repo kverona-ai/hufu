@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | M0 to M5 are implemented in Hufu 0.1, and Hufu can update itself from published releases. What remains is verification against real agents and the first stable release |
-| **Last updated** | 2026-11-13 (`hufu update`; releases with prebuilt binaries, as pre-releases for now) |
+| **Status** | M0 to M5 are implemented, the adapters follow each agent's documentation as of 2026-11-20, and Hufu 1.0.0 is the first stable release. What remains open is live verification against real, logged-in agents |
+| **Last updated** | 2026-11-20 (1.0: adapters refreshed against each agent's latest release, `xhigh`, `hufu models`, first stable release) |
 | **Related** | [Requirements](requirements/requirements.md), [Architecture](architecture/architecture.md), [User guide](guide/user-guide.md) |
 
 The milestones were planned so that each would be useful on its own. The project owner then asked
@@ -19,7 +19,8 @@ flowchart LR
     M2 --> M3["M3<br/>Pluggable commander"]
     M3 --> M4["M4<br/>Always on"]
     M4 --> M5["M5<br/>Beyond the workspace"]
-    M5 --> N["Next<br/>real agents,<br/>first release"]
+    M5 --> R["1.0<br/>refresh and<br/>stable release"]
+    R --> N["Next<br/>real agents,<br/>channels"]
 ```
 
 ## How "implemented" was checked
@@ -31,6 +32,7 @@ flowchart LR
 | Unit tests for parsers, mappings, configuration, schema validation, routing | Pass |
 | `hufu doctor --self-test` on the built binary | Pass on the three platforms in CI |
 | Formatting, lints (also for the Windows and macOS targets), minimum Rust version | Clean |
+| The installed Codex 0.170, Claude Code 2.1.328 and Antigravity 1.5.12 asked for `--help`, versions and model lists on one macOS machine | Flags and listing formats match the adapters (2026-11-20) |
 | Runs against real, logged-in agents | **Not done.** The development environment has no agent accounts |
 
 The fake agents print what each agent's documentation says the real one prints. They prove that
@@ -104,7 +106,7 @@ them a model reached through pi.
 |---|---|
 | Concurrency limits, global and per profile, enforced with and without the daemon | FR-32 |
 | Optional daemon: ordered queue, restart of lost jobs, pruning | FR-46 |
-| MCP server with 22 tools, including configuration tools | FR-45, FR-58, FR-59 |
+| MCP server with 22 tools (23 since 1.0, with `hufu_models`), including configuration tools | FR-45, FR-58, FR-59 |
 | Retry policies | FR-10 |
 | Several accounts per agent, pools with failover, round-robin and least-busy | FR-60 to FR-62 |
 | One-command setup: `hufu up`, `hufu init`, `hufu setup` for five hosts; install scripts; an [install guide written for agents](guide/agent-install.md), found through `AGENTS.md` and `llms.txt` | FR-63, FR-64, FR-66 |
@@ -144,8 +146,22 @@ silicon, which no test machine of this project has.
 | Releases with prebuilt binaries for six targets, their checksums and `hufu-manifest.json` | One workflow, started by hand or by a tag. Every release is checked on Linux, macOS and Windows before and after it is published |
 | A dry run of the whole release on pull requests that touch it | The release path is tested before a release depends on it |
 
-Versions are pre-releases (`0.1.0-alpha.N`) until live verification, below, is done: the binaries
-are real, the adapters have not met real agents yet.
+The 0.1 versions were pre-releases (`0.1.0-alpha.N`). 1.0.0 is the first stable release, so the
+install scripts and `hufu update` now serve it.
+
+## 1.0. Refresh and stable release
+
+**State: implemented.**
+
+| Delivered | Notes |
+|---|---|
+| Every adapter checked against its agent's latest documentation and changelog (2026-11-20) | [Agent landscape](research/agent-landscape.md) records what changed and the evidence |
+| `xhigh` on the effort scale, mapped for Codex, Claude Code, Antigravity, Kimi Code, pi and ACP | [ADR-0005](adr/0005-explicit-permission-and-effort-mapping.md), amended |
+| `hufu models` and `hufu_models`: the models and effort levels each agent offers, asked from the agent itself | `codex debug models`, `agy models`, `cursor-agent models`, `pi --list-models`, Kimi's `config.toml`, an ACP session; Claude Code from its documentation |
+| Cursor runs as `cursor-agent`, and an `agent` that is another CLI is not mistaken for it | The Grok CLI also installs `agent` |
+| `agy acp` preset; agy's `workspace-write` names its mode; Claude Code's lower tiers pass `--permission-prompts none`; Cursor's `approvalMode: unrestricted` is detected | Tiers no longer depend on the user's settings of the agent |
+| Kimi Code print-mode jobs can be resumed; Kimi's effort is offered only where Kimi applies it | |
+| pi providers added: Google Vertex AI, MiniMax China, Qwen token plans, Xiaomi, OpenCode, Baseten, Radius, TypeSafe | |
 
 ## Next
 
@@ -153,13 +169,14 @@ In order:
 
 1. **Live verification.** Run each adapter against the real agent on a machine that has the
    logins: one read-only job, one writing job, one cancel, one resume. Record the agent version in
-   the [agent landscape](research/agent-landscape.md) and fix what differs from the documentation.
-2. **First stable release.** Set the version to `0.1.0` and run the release workflow. Until then
-   the install scripts and `hufu update` serve the newest pre-release.
-3. **Distribution channels.** crates.io, a Homebrew tap, an npm installer. Each needs an account or
+   the [agent landscape](research/agent-landscape.md#6-open-verification-items) and fix what
+   differs from the documentation. Reports from users are welcome as
+   [issues](https://github.com/kverona-ai/hufu/issues).
+2. **Distribution channels.** crates.io, a Homebrew tap, an npm installer. Each needs an account or
    a name reserved by the maintainers.
-4. **Computer use on a real desktop.** With LCU on Apple silicon, and with one agent's native
+3. **Computer use on a real desktop.** With LCU on Apple silicon, and with one agent's native
    computer use.
+4. **More agents.** The Grok CLI (`grok`, with `agent agent stdio`) is a candidate adapter.
 
 ## Later
 

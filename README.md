@@ -9,9 +9,10 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-d9931f"></a>
   <a href="https://github.com/kverona-ai/hufu/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kverona-ai/hufu/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="doc/roadmap.md"><img alt="Status: 0.1, pre-release" src="https://img.shields.io/badge/status-0.1%20pre--release-b3261e"></a>
+  <a href="https://github.com/kverona-ai/hufu/releases/latest"><img alt="Release: 1.0.0" src="https://img.shields.io/badge/release-1.0.0-2e7d32"></a>
   <a href="doc/deployment/deployment.md"><img alt="Linux, macOS, Windows" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-4b6bfb"></a>
   <a href="doc/adr/0007-implement-in-rust.md"><img alt="Written in Rust" src="https://img.shields.io/badge/built%20with-Rust-b7410e"></a>
+  <a href="https://github.com/kverona-ai/hufu/issues"><img alt="Issues welcome" src="https://img.shields.io/badge/issues-welcome-8e44ad"></a>
 </p>
 
 # Hufu
@@ -20,13 +21,10 @@
 act as the advisor that plans and reviews; any other agent can be dispatched to do the work. One
 task spec, one set of commands and one result format, whichever agents are on either side.
 
-> [!NOTE]
-> **Status: 0.1, pre-release.** Everything described here is implemented and tested end to end on
-> Linux, macOS and Windows against built-in fake agents, one per adapter. The adapters were written
-> from each agent's current documentation and have **not** yet been exercised against real agent
-> accounts by this project's CI, so expect first-contact issues and please report them. Releases
-> are pre-releases (`0.1.0-alpha.N`) for the same reason. They come with prebuilt binaries for six
-> platforms; where none can be downloaded, the installer builds from source.
+Hufu 1.0 drives Codex, Claude Code, Antigravity, Cursor, Kimi Code, pi (and through it OpenRouter,
+DeepSeek, Z.ai and other model APIs) and any agent that speaks the Agent Client Protocol. It runs
+on Linux, macOS and Windows as one self-contained program, and every release comes with prebuilt
+binaries for six platforms.
 
 ## Why
 
@@ -114,7 +112,7 @@ $ hufu update --check    # only say whether there is a newer one
 `hufu update` downloads the newest release, checks its SHA-256 sum, makes sure the new program
 starts, and only then replaces the old one. It restarts the daemon if one was running and ends with
 `hufu doctor`. Running jobs finish with the version they started with, and your configuration and
-job records are not touched. `--version v0.2.0` installs a particular release, which is also the
+job records are not touched. `--version v1.0.0` installs a particular release, which is also the
 way back to an older one. Or ask your agent: "update Hufu". Afterwards, restart the agents that
 have Hufu connected, so that they pick up the new version.
 
@@ -170,7 +168,7 @@ flowchart LR
 | 👥 **Many executors, many accounts** | Any number of profiles, including several accounts of the same agent. Pools fail over or rotate between them. [Who gets the work](#who-gets-the-work) |
 | 💾 **Jobs outlive sessions** | State, logs and results live on disk. Lose the session, keep the work |
 | 🔒 **Explicit permissions** | Three tiers, `read-only`, `workspace-write`, `full-access`, translated per agent. A tier an agent cannot honour is refused, never widened, and a read-only job that changed files is failed |
-| 🎚️ **Model and effort per task** | Choose the model and the reasoning effort per task, per profile or as a default. One effort scale is mapped to each agent's own control; an unmappable level is an error, not a silent skip. [How to set them](#choose-the-model-and-the-effort) |
+| 🎚️ **Model and effort per task** | Choose the model and the reasoning effort per task, per profile or as a default. One effort scale, `low` to `xhigh` and `max`, is mapped to each agent's own control; an unmappable level is an error, not a silent skip. Hufu asks each agent which models it offers. [How to set them](#choose-the-model-and-the-effort) |
 | ✅ **Tally check** | Exit code `0` is not success. Acceptance checks decide whether work is accepted |
 | 🔌 **MCP in, ACP out** | Any agent that speaks MCP can drive Hufu and even configure it. Any agent that speaks ACP can be driven with a few lines of configuration |
 | 🖥️ **Computer use, routed** | A task can be granted desktop control. The work goes to a dedicated operator profile or to any executor that supports it, always behind an explicit grant |
@@ -236,27 +234,33 @@ More samples: [`doc/examples/`](doc/examples/). Every command and setting: [user
 
 ## Agents
 
-| Agent | Adapter | How Hufu drives it | Tiers |
-|---|---|---|---|
-| Codex (OpenAI) | `codex-cli` | `codex exec --json` | all three |
-| Antigravity (Google) | `agy-cli` | `agy -p` | all three |
-| Cursor | `cursor-cli` | `agent -p --output-format stream-json` | all three |
-| Claude Code (Anthropic) | `claude-cli` | `claude -p --output-format stream-json` | all three |
-| Kimi Code (Moonshot) | `kimi-cli` | print mode | `full-access` only |
-| pi, and through it OpenRouter, DeepSeek, Z.ai, Kimi | `pi` | JSON mode | `read-only`, `full-access` |
-| Cursor, Kimi Code, Gemini CLI, OpenCode, Goose, Qwen Code and other ACP agents | `acp` | Agent Client Protocol v1; Hufu answers every permission request | `full-access` until the agent is marked verified, then all three |
-| Anything else | `external` | your own adapter program, a small JSON protocol | what it declares |
+| Agent | Adapter | How Hufu drives it | Tiers | Models listed by |
+|---|---|---|---|---|
+| Codex (OpenAI) | `codex-cli` | `codex exec --json` | all three | `codex debug models` |
+| Claude Code (Anthropic) | `claude-cli` | `claude -p --output-format stream-json` | all three | Claude Code's model page, copied by Hufu |
+| Antigravity (Google) | `agy-cli` | `agy -p --output-format stream-json` | all three | `agy models` |
+| Cursor | `cursor-cli` | `cursor-agent -p --output-format stream-json` | all three | `cursor-agent models` |
+| Kimi Code (Moonshot) | `kimi-cli` | print mode, resumable | `full-access` only | Kimi's `config.toml` |
+| pi, and through it OpenRouter, DeepSeek, Z.ai, Kimi, Qwen, MiniMax and more | `pi` | JSON mode | `read-only`, `full-access` | `pi --list-models` |
+| Kimi Code, Antigravity, Cursor, Gemini CLI, OpenCode, Goose, Qwen Code and other ACP agents | `acp` | Agent Client Protocol v1; Hufu answers every permission request | `full-access` until the agent is marked verified, then all three | the session's model option |
+| Anything else | `external` | your own adapter program, a small JSON protocol | what it declares | n/a |
 
-`hufu agents` shows this for your own configuration, and `hufu agents --probe` checks installation
-and login. What each agent supports, and how sure we are of it, is recorded in the
+Presets exist for each of them (`codex`, `claude`, `agy`, `cursor`, `kimi`, `pi`, and `kimi-acp`,
+`agy-acp`, `cursor-acp` over ACP), so an installed agent works without configuration.
+`hufu agents` shows what your own profiles can do, `hufu agents --probe` checks installation and
+login, and `hufu models <profile>` shows the models and effort levels the agent itself offers.
+
+The adapters follow each agent's documentation and changelog as of 20 November 2026, and the
+listing formats were checked against the installed Codex, Claude Code and Antigravity CLIs. What
+each agent supports, and how sure we are of it, is recorded in the
 [agent landscape](doc/research/agent-landscape.md).
 
 ## Use it from any agent
 
 `hufu setup` registers Hufu's MCP server with Claude Code, Codex, Cursor, Kimi Code and
 Antigravity (`hufu setup --agent generic --print` shows the snippet for any other host). The
-connected agent then has 22 tools: dispatch and follow jobs, run missions, and read and change
-Hufu's configuration, including adding profiles and pools. "Add my second Codex account to Hufu
+connected agent then has 23 tools: dispatch and follow jobs, list each agent's models, run
+missions, and read and change Hufu's configuration, including adding profiles and pools. "Add my second Codex account to Hufu
 and make a pool of both" is a sentence you can type into any of them.
 
 The next two sections show the two things people ask for most from inside an agent:
@@ -285,16 +289,29 @@ When none of them says anything, the agent uses its own default model and effort
 This is the usual way. Say what you want to any agent that has Hufu connected (Claude Code, Codex,
 Cursor, ...), and it makes the tool call for you.
 
+**Which models are there?**
+
+> Which models can Hufu's Codex use, and at what effort?
+
+```jsonc
+// hufu_models
+{ "agent": "codex" }
+```
+
+The agent is asked directly (here with `codex debug models`), so the answer lists the ids your
+account really has, each with its effort levels and default level, and the effort values Hufu
+accepts for that profile.
+
 **For one task.**
 
-> Have Codex review src/auth for race conditions. Use gpt-6.1-sol at high effort.
+> Have Codex review src/auth for race conditions. Use gpt-6.2-sol at high effort.
 
 ```jsonc
 // hufu_submit
 {
   "agent": "codex",
   "prompt": "Review src/auth for race conditions. Give the file and line of each finding.",
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "effort": "high"
 }
 ```
@@ -302,7 +319,7 @@ Cursor, ...), and it makes the tool call for you.
 **For every task of one executor.** Give the combination a name, as a profile. Its description is
 what your agent, or the advisor of a mission, later reads when it picks an executor:
 
-> Add a Hufu profile "codex-deep": Codex with gpt-6.1-sol at max effort, for hard design and
+> Add a Hufu profile "codex-deep": Codex with gpt-6.2-astra at xhigh effort, for hard design and
 > debugging work.
 
 ```jsonc
@@ -311,8 +328,8 @@ what your agent, or the advisor of a mission, later reads when it picks an execu
   "name": "codex-deep",
   "profile": {
     "adapter": "codex-cli",
-    "model": "gpt-6.1-sol",
-    "effort": "max",
+    "model": "gpt-6.2-astra",
+    "effort": "xhigh",
     "description": "Hard design and debugging work"
   }
 }
@@ -333,38 +350,43 @@ job, the `agent` block of `hufu_result` names the profile, model and effort that
 
 ### The effort scale
 
-There is one scale for every agent: `off`, `low`, `medium`, `high`, `max`. `default` passes
-nothing and lets the agent decide, and `native:<value>` passes the agent's own value through, for
-example `native:xhigh` for Codex.
+There is one scale for every agent: `off`, `low`, `medium`, `high`, `xhigh`, `max`. `default`
+passes nothing and lets the agent decide, and `native:<value>` passes the agent's own value
+through, for example `native:ultra` for Codex (which hands the work to subagents) or
+`native:ultracode` for Claude Code.
 
-| Agent | Levels it has | What Hufu passes for `high` | Model |
+| Agent | Levels it has | What Hufu passes for `xhigh` | Model, for example |
 |---|---|---|---|
-| Codex | `low` to `max` | `-c model_reasoning_effort="high"` | `-m <id>` |
-| Claude Code | `low` to `max` | `--effort high` | `--model <id>` |
-| Antigravity | `low` to `high` | `--effort high` | `--model <id>` |
-| Kimi Code | `low` to `max` | the variable `KIMI_MODEL_THINKING_EFFORT=high` | `-m <id>` |
-| pi | `off` to `max` | `--thinking high` | `--model <id>` |
+| Codex | `low` to `max` | `-c model_reasoning_effort="xhigh"` | `-m gpt-6.2-sol` |
+| Claude Code | `low` to `max` | `--effort xhigh` | `--model opus` |
+| Antigravity | `low` to `max` | `--effort xhigh` | `--model <slug from agy models>` |
+| Kimi Code | `low` to `max`, when the profile defines its model with `KIMI_MODEL_NAME`; otherwise Kimi's own `config.toml` decides | `KIMI_MODEL_THINKING_EFFORT=xhigh` | `-m kimi-code/k3` |
+| pi | `off` to `max` | `--thinking xhigh` | `--model <provider model id>` |
 | Cursor | none | nothing: pick reasoning strength through the model id | `--model <id>` |
 | ACP agents | what the agent offers when the session opens | a session option | a session option |
 
-Two rules:
+Three rules:
 
 - **A level an agent does not have is an error**, raised before anything starts. Set
   `effort_fallback: nearest` on the profile, and Hufu uses the closest level the agent has and says
   so in the job's warnings. `defaults.effort` is milder: for an agent without that level, the
   agent's own default is used, with a warning.
-- **A model id is passed on as it is.** Hufu keeps no list of models; the agent decides whether
-  the id exists.
+- **A model can have fewer levels than its agent.** Codex refuses a level the model lacks; Claude
+  Code, Antigravity and pi use the next level the model has. `hufu models` shows each model's
+  levels where the agent lists them.
+- **A model id is passed on as it is.** Hufu keeps no model list of its own; the agent decides
+  whether the id exists.
 
 ### From the command line
 
 ```console
-$ hufu run -a codex -m gpt-6.1-sol -e high "Review src/auth for race conditions"
-$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.1-sol --effort max \
+$ hufu models codex                                         # what the agent offers
+$ hufu run -a codex -m gpt-6.2-sol -e high "Review src/auth for race conditions"
+$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.2-astra --effort xhigh \
     --description "Hard design and debugging work"
 $ hufu profile set agy --effort-fallback nearest
 $ hufu config set defaults.effort medium
-$ hufu run -a codex -m gpt-6.1-sol -e high --dry-run "x"    # print the command line, start nothing
+$ hufu run -a codex -m gpt-6.2-sol -e high --dry-run "x"    # print the command line, start nothing
 ```
 
 ## Who gets the work
@@ -456,7 +478,8 @@ More in the user guide: [pools](doc/guide/user-guide.md#pools),
 | **M4** | Always on: daemon, limits, account pools, MCP server | ✅ Implemented |
 | **M5** | Beyond the workspace: computer-use routing | ✅ Implemented |
 | **Since M5** | Self-update (`hufu update`) and releases with prebuilt binaries for six platforms | ✅ Implemented |
-| **Next** | Verification against real agent accounts, first stable release | ⚪ Open |
+| **1.0** | Every adapter refreshed against its agent's latest release, `xhigh`, `hufu models`, first stable release | ✅ Released |
+| **Next** | Runs against real agent accounts in CI, distribution channels (crates.io, Homebrew), more agents | ⚪ Open |
 
 Details: [doc/roadmap.md](doc/roadmap.md).
 
@@ -506,10 +529,17 @@ Hufu the project borrows both ideas. **Whoever holds the tally commands**: the a
 not a fixed program. And **work counts only when the halves match**: a task's spec and its result
 are checked against each other before anything is accepted.
 
-## Contributing
+## Issues and contributions welcome
 
-Reports from runs against real agents are the most useful contribution right now. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Hufu 1.0 is the first stable release, and your reports make the next one better. Please
+[open an issue](https://github.com/kverona-ai/hufu/issues) for anything: a bug, an agent that
+behaves differently from what Hufu expects, a model or effort level that is missing, a question, or
+an idea. The most helpful report says which agent and version you ran (`hufu agents --probe`), what
+you ran (`--dry-run` shows the exact command line), and what happened (`hufu logs <job> --raw`,
+`hufu --json result <job>`), with anything private removed.
+
+Pull requests are welcome too; [CONTRIBUTING.md](CONTRIBUTING.md) says where things go and what the
+checks are.
 
 ## License
 

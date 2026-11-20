@@ -35,6 +35,7 @@ doc/
 ├── deployment/
 │   ├── deployment.md             install, configure, connect hosts, operate, release
 │   └── cloud-environment.md      what cloud development sessions need
+├── releases/                     the text of each release, in English and Chinese
 ├── adr/                          architecture decision records
 ├── examples/                     sample configuration, task and mission files
 └── assets/                       images used by the README and documents
@@ -70,6 +71,7 @@ doc/
 ### Deployment
 - [Deployment and operations](deployment/deployment.md)
 - [Cloud development environment](deployment/cloud-environment.md)
+- [Release notes](releases/): [1.0.0](releases/v1.0.0.md)
 
 ## Conventions
 

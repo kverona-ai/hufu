@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
         --up) UP=1 ;;
         --from-source) FROM_SOURCE=1 ;;
         --version)
-            [ $# -ge 2 ] || fail "--version needs a tag, for example v0.1.0"
+            [ $# -ge 2 ] || fail "--version needs a tag, for example v1.0.0"
             VERSION="$2"
             shift
             ;;

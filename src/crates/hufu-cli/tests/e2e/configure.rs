@@ -25,7 +25,7 @@ fn a_fresh_machine_works_with_presets_and_init_writes_a_first_file() {
     let (_, agents) = env.json(&["agents"]);
     let names: Vec<String> =
         agents["agents"].as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
-    for preset in ["codex", "agy", "cursor", "claude", "kimi", "pi", "kimi-acp", "cursor-acp"] {
+    for preset in ["codex", "agy", "cursor", "claude", "kimi", "pi", "kimi-acp", "cursor-acp", "agy-acp"] {
         assert!(names.contains(&preset.to_string()), "preset `{preset}` is missing: {names:?}");
     }
     let (_, paths) = env.json(&["config", "path"]);
@@ -601,4 +601,61 @@ fn the_documented_examples_are_valid() {
     env.hufu(&["mission", "wait", &id, "--timeout", "60s"]);
     let (_, ended) = env.json(&["mission", "status", &id]);
     assert_eq!(strings(&ended["executors"]), vec!["codex-any", "kimi", "agy-fast"], "{ended}");
+}
+
+#[test]
+fn models_are_asked_from_each_agent() {
+    let env = Env::new("models");
+    let kimi_home = env.root.join("kimi-home");
+    std::fs::create_dir_all(&kimi_home).unwrap();
+    std::fs::write(
+        kimi_home.join("config.toml"),
+        "default_model = \"kimi-code/k3\"\n\n[models.\"kimi-code/k3\"]\nmodel = \"k3\"\n",
+    )
+    .unwrap();
+    env.config(json!({
+        "profiles": {"kimi": {"home": kimi_home.display().to_string()}, "deep": {"adapter": "pi", "command": fake("pi"), "provider": "deepseek", "allow_full_access": true}},
+        "pools": {"any": {"members": ["codex", "agy"]}},
+    }));
+
+    let (code, codex) = env.json(&["models", "codex"]);
+    assert_eq!(code, 0, "{codex}");
+    assert_eq!(codex["source"], "agent");
+    assert_eq!(
+        strings(&json!(codex["models"].as_array().unwrap().iter().map(|m| m["id"].clone()).collect::<Vec<_>>())),
+        ["fake-codex-small", "fake-codex-large"]
+    );
+    assert_eq!(strings(&codex["models"][0]["efforts"]), ["low", "ultra"]);
+    assert!(strings(&codex["hufu_efforts"]).contains(&"xhigh".to_string()), "{codex}");
+
+    let (_, agy) = env.json(&["models", "agy"]);
+    assert_eq!(agy["models"][0]["id"], "fake-agy-high");
+    assert_eq!(agy["models"][0]["name"], "Fake Agy (High)");
+    let (_, cursor) = env.json(&["models", "cursor"]);
+    assert_eq!(cursor["models"][0]["id"], "auto");
+    assert_eq!(cursor["models"][0]["default"], true);
+    assert_eq!(cursor["models"][1]["id"], "fake-composer");
+    let (_, pi) = env.json(&["models", "deep"]);
+    assert_eq!(pi["models"].as_array().unwrap().len(), 1, "{pi}");
+    assert_eq!(pi["models"][0]["id"], "fake-deep");
+    let (_, acp) = env.json(&["models", "acp"]);
+    assert_eq!(acp["models"][0]["id"], "fake-small");
+    assert_eq!(acp["models"][0]["default"], true);
+    assert_eq!(strings(&acp["efforts"]), ["low", "medium", "high"]);
+    let (_, claude) = env.json(&["models", "claude"]);
+    assert_eq!(claude["source"], "documentation");
+    assert!(claude["models"].as_array().unwrap().iter().any(|m| m["id"] == "opus"));
+    let (_, kimi) = env.json(&["models", "kimi"]);
+    assert_eq!(kimi["source"], "config");
+    assert_eq!(kimi["models"][0]["id"], "kimi-code/k3");
+    assert_eq!(kimi["models"][0]["default"], true);
+
+    let human = env.hufu(&["models", "codex"]).expect(0).stdout;
+    assert!(human.contains("fake-codex-small") && human.contains("hufu effort for this profile"), "{human}");
+    let pool = env.hufu(&["models", "any"]);
+    assert_ne!(pool.code, 0);
+    assert!(pool.stderr.contains("is a pool"), "{}", pool.stderr);
+    let ext = env.hufu(&["models", "ext"]);
+    assert_ne!(ext.code, 0);
+    assert!(ext.stderr.contains("no way to list models"), "{}", ext.stderr);
 }

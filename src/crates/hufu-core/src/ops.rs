@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use hufu_contract::time::{now_ms, parse_duration, parse_rfc3339};
-use hufu_contract::{AdapterRegistry, Capabilities, ProbeResult};
+use hufu_contract::{AdapterRegistry, Capabilities, Effort, ModelList, ProbeResult};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -99,6 +99,48 @@ pub fn agents(loaded: &Loaded, adapters: &dyn AdapterRegistry, probe: bool) -> V
         });
     }
     out
+}
+
+/// What `hufu models` shows for one profile: the agent's own list, and the effort values Hufu
+/// accepts for the profile.
+#[derive(Clone, Debug, Serialize)]
+pub struct ModelsView {
+    pub profile: String,
+    pub adapter: String,
+    /// The model the profile sets, used when a task names none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_model: Option<String>,
+    /// The `effort` values Hufu accepts for this profile; `native:<value>` passes an agent value through.
+    pub hufu_efforts: Vec<Effort>,
+    pub native_effort: bool,
+    #[serde(flatten)]
+    pub list: ModelList,
+}
+
+/// Asks the agent behind a profile which models it offers (`hufu models`). Runs only the
+/// agent's own listing command or an ACP handshake, never a prompt.
+pub fn models(loaded: &Loaded, adapters: &dyn AdapterRegistry, name: &str, cwd: &Path) -> Result<ModelsView> {
+    let config = &loaded.config;
+    let Some(profile) = config.profiles.get(name) else {
+        return Err(HufuError::usage(match config.pools.get(name) {
+            Some(pool) => format!("`{name}` is a pool; name one of its members: {}", pool.members.join(", ")),
+            None => format!("no profile `{name}`; `hufu agents` lists them"),
+        }));
+    };
+    let adapter = adapters
+        .get(&profile.adapter)
+        .ok_or_else(|| HufuError::usage(format!("profile `{name}` uses unknown adapter `{}`", profile.adapter)))?;
+    let env = crate::submit::env_for(adapters, profile);
+    let list = adapter.models(profile, &env, cwd).map_err(|e| HufuError::unavailable(e.0))?;
+    let caps = adapter.capabilities(profile);
+    Ok(ModelsView {
+        profile: name.to_string(),
+        adapter: profile.adapter.clone(),
+        profile_model: profile.model.clone(),
+        hufu_efforts: caps.efforts,
+        native_effort: caps.native_effort,
+        list,
+    })
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -51,3 +51,10 @@ unrestricted on the next, with the same task spec.
   current as agent CLIs change; the conformance suite and version checks in `hufu doctor` are the
   guard.
 - A tier is only as strong as the agent's own enforcement. The documentation says so plainly.
+
+## Amendment (2026-11-20, Hufu 1.0)
+
+The effort scale gained `xhigh` between `high` and `max`, because Codex, Claude Code, Antigravity,
+Kimi Code and pi had all added a level of that name. The rules above are unchanged: a profile still
+declares the levels it can map, and a level it lacks is refused unless the profile opts into
+`effort_fallback: nearest`.

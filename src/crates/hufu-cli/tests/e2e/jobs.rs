@@ -382,13 +382,13 @@ fn model_and_effort_come_from_the_task_then_the_profile_then_the_default() {
     assert!(strings(&r["warnings"]).iter().any(|w| w.contains("default effort `medium`")), "{r}");
 
     // A level asked for by name is refused, unless the profile accepts the nearest one.
-    let refused = env.hufu(&["run", "-a", "agy", "-e", "max", "x"]).expect(2);
+    let refused = env.hufu(&["run", "-a", "agy", "-e", "off", "x"]).expect(2);
     assert!(refused.stderr.contains("effort_fallback: nearest"), "{}", refused.stderr);
     assert!(env.hufu(&["profile", "set", "agy", "--effort-fallback", "closest"]).expect(2).stderr.contains("nearest"));
     env.hufu(&["profile", "set", "agy", "--effort-fallback", "nearest"]).expect(0);
-    let r = ran(&["-a", "agy", "-e", "max", "x"]);
-    assert_eq!(r["agent"]["effort"], "high");
-    assert!(strings(&r["warnings"]).iter().any(|w| w.contains("nearest level `high`")), "{r}");
+    let r = ran(&["-a", "agy", "-e", "off", "x"]);
+    assert_eq!(r["agent"]["effort"], "low");
+    assert!(strings(&r["warnings"]).iter().any(|w| w.contains("nearest level `low`")), "{r}");
 }
 
 #[test]
@@ -482,10 +482,17 @@ fn a_finished_session_can_be_resumed() {
     assert!(message.contains("resumed fake-session-1") && message.contains("follow-up"), "{message}");
     assert_eq!(second["agent"]["permission"], "workspace-write", "the follow-up keeps the tier");
 
-    // An adapter without sessions says so instead of starting a fresh conversation.
+    // Kimi's print mode is resumable through the session id its stream ends with.
     let (_, kimi) = env.run(&["-a", "kimi", "-p", "full-access", "x"]);
-    let r = env.hufu(&["resume", kimi["job"].as_str().unwrap(), "more"]);
+    assert_eq!(kimi["session"]["resumable"], true, "{kimi}");
+    let r = env.hufu(&["--json", "resume", kimi["job"].as_str().unwrap(), "--wait", "more"]).expect(0);
+    assert!(r.json()["final_message"].as_str().unwrap().contains("resumed"), "{}", r.stdout);
+
+    // A job that left no session says so instead of starting a fresh conversation.
+    let (_, failed) = env.run(&["-a", "codex", "[[fake:auth]]"]);
+    let r = env.hufu(&["resume", failed["job"].as_str().unwrap(), "more"]);
     assert_eq!(r.code, 2, "{}", r.stderr);
+    assert!(r.stderr.contains("no resumable session"), "{}", r.stderr);
 }
 
 #[test]

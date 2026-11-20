@@ -537,8 +537,11 @@ pub fn presets() -> BTreeMap<String, Profile> {
     add("kimi-acp", "acp", "Kimi Code over ACP, so that Hufu answers permission requests", &|p| {
         p.command = vec!["kimi".into(), "acp".into()];
     });
+    add("agy-acp", "acp", "Antigravity over ACP (`agy acp`), so that Hufu answers permission requests", &|p| {
+        p.command = vec!["agy".into(), "acp".into()];
+    });
     add("cursor-acp", "acp", "Cursor agent over ACP", &|p| {
-        p.command = vec!["agent".into(), "acp".into()];
+        p.command = vec!["cursor-agent".into(), "acp".into()];
         p.auth_method = Some("cursor_login".into());
         p.env = vec!["CURSOR_API_KEY".into()];
     });

@@ -70,13 +70,13 @@ The agents Hufu can drive, and the program each one puts on `PATH`:
 |---|---|---|
 | Codex | `codex` | `codex login` |
 | Antigravity | `agy` | running `agy` once, interactively |
-| Cursor | `agent` | `agent login`, or `CURSOR_API_KEY` |
+| Cursor | `cursor-agent` (also installed as `agent`) | `cursor-agent login`, or `CURSOR_API_KEY` |
 | Kimi Code | `kimi` | `kimi login` |
 | Claude Code | `claude` | running `claude` once, interactively |
 | pi (OpenRouter, DeepSeek, Z.ai, Kimi and other model APIs) | `pi` | the provider's API key in the environment |
 
 ```bash
-command -v codex agy agent kimi claude pi
+command -v codex agy cursor-agent kimi claude pi
 ```
 
 You are probably one of these yourself, and that counts. An agent that runs only inside an editor,

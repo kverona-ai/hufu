@@ -5,7 +5,7 @@ use hufu_contract::{Effort, effort_list, tier_list};
 use hufu_core::doctor::{DoctorReport, SelfTest};
 use hufu_core::error::exit;
 use hufu_core::mission::Mission;
-use hufu_core::ops::AgentView;
+use hufu_core::ops::{AgentView, ModelsView};
 use hufu_core::store::{JobResult, JobState, State, Verdict};
 
 /// Prints rows as aligned columns.
@@ -239,6 +239,44 @@ pub fn agents(list: &[AgentView], probed: bool) {
         headers.push("STATUS");
     }
     table(&headers, &rows);
+}
+
+pub fn models(v: &ModelsView) {
+    let source = match v.list.source.as_str() {
+        "agent" => "asked the agent",
+        "config" => "read the agent's configuration",
+        "documentation" => "Hufu's copy of the agent's documentation",
+        other => other,
+    };
+    println!("{} ({}): {source}, {}", v.profile, v.adapter, v.list.from);
+    let rows: Vec<Vec<String>> = v
+        .list
+        .models
+        .iter()
+        .map(|m| {
+            vec![
+                format!("{}{}", m.id, if m.default { " *" } else { "" }),
+                m.name.clone().or(m.description.clone()).unwrap_or_else(|| "-".into()),
+                if m.efforts.is_empty() { "-".into() } else { m.efforts.join(", ") },
+                m.default_effort.clone().unwrap_or_else(|| "-".into()),
+            ]
+        })
+        .collect();
+    table(&["MODEL", "ABOUT", "AGENT EFFORTS", "DEFAULT EFFORT"], &rows);
+    if v.list.models.iter().any(|m| m.default) {
+        println!("* the model the agent uses when none is named");
+    }
+    if !v.list.efforts.is_empty() {
+        println!("agent efforts for every model: {}", v.list.efforts.join(", "));
+    }
+    if let Some(model) = &v.profile_model {
+        println!("profile model: {model}");
+    }
+    let native = if v.native_effort { ", or native:<agent value>" } else { "" };
+    println!("hufu effort for this profile: {}{native}", effort_list(&v.hufu_efforts));
+    for note in &v.list.notes {
+        println!("note: {note}");
+    }
 }
 
 pub fn doctor(r: &DoctorReport) {

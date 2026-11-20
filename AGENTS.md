@@ -8,7 +8,7 @@ pointed at this repository where to go.
 
 Follow **[doc/guide/agent-install.md](doc/guide/agent-install.md)** from top to bottom. In short:
 
-1. Check that at least one agent program (`codex`, `agy`, `agent`, `kimi`, `claude` or `pi`) is
+1. Check that at least one agent program (`codex`, `agy`, `cursor-agent`, `kimi`, `claude` or `pi`) is
    installed and logged in. Hufu installs no agents and logs in for nobody; that part is the user's.
    With none, `hufu up` sets nothing up: it lists how to install each agent and exits with code
    `10`. Pass that on to the user and run `hufu up` again afterwards.
