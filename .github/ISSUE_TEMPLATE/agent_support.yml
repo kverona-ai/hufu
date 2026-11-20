@@ -1,0 +1,34 @@
+name: Agent or model support
+description: An agent, model or effort level is missing, or a new agent release changed something.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Agents change quickly. If a new release added a model, an effort level or a flag that Hufu
+        does not know yet, tell us here. 中文或英文都可以。
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      description: For example `codex --version`, `agy --version`, `cursor-agent --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is missing or different
+      description: The model, effort level, flag or behaviour, and what Hufu does today.
+    validations:
+      required: true
+  - type: textarea
+    id: models
+    attributes:
+      label: hufu models
+      description: The output of `hufu models <profile>`, if it is relevant.
+      render: text
+  - type: input
+    id: source
+    attributes:
+      label: Official source
+      description: A link to the agent's documentation or changelog that describes it, if you have one.

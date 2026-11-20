@@ -62,7 +62,8 @@ fn host_binary(host: &str) -> &'static str {
     match host {
         "claude" => "claude",
         "codex" => "codex",
-        "cursor" => "agent",
+        // Cursor's own name for its CLI; `agent` may belong to another CLI (the Grok CLI installs one).
+        "cursor" => "cursor-agent",
         "kimi" => "kimi",
         _ => "agy",
     }
@@ -433,8 +434,7 @@ pub struct InitReport {
 pub const PRESET_ORDER: &[&str] = &["codex", "claude", "agy", "cursor", "kimi", "pi"];
 
 /// The agents Hufu can dispatch to, each with the program it puts on `PATH`.
-pub const SUPPORTED_AGENTS: &str =
-    "Codex (`codex`), Claude Code (`claude`), Antigravity (`agy`), Cursor (`agent`), Kimi Code (`kimi`) or pi (`pi`)";
+pub const SUPPORTED_AGENTS: &str = "Codex (`codex`), Claude Code (`claude`), Antigravity (`agy`), Cursor (`cursor-agent`), Kimi Code (`kimi`) or pi (`pi`)";
 
 /// What to run once an agent has been installed. `rewrite` is set when a configuration file
 /// exists and names no agent: `hufu init` keeps an existing file, so only `--force` refreshes it.

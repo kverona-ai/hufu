@@ -339,9 +339,13 @@ impl Voice for Cursor {
     }
 }
 
-struct Kimi;
+struct Kimi {
+    session: String,
+}
 impl Voice for Kimi {
-    fn start(&mut self, _session: &str) {}
+    fn start(&mut self, session: &str) {
+        self.session = session.to_string();
+    }
     fn tool(&mut self, id: &str, _kind: &str, title: &str, denied: bool) {
         emit(
             json!({"role": "assistant", "content": "", "tool_calls": [{"type": "function", "id": id, "function": {"name": "Shell", "arguments": json!({"command": title}).to_string()}}]}),
@@ -352,7 +356,9 @@ impl Voice for Kimi {
     fn say(&mut self, text: &str) {
         emit(json!({"role": "assistant", "content": text}));
     }
-    fn finish(&mut self, _text: Option<&str>) {}
+    fn finish(&mut self, _text: Option<&str>) {
+        emit(json!({"type": "session.resume_hint", "session_id": self.session}));
+    }
     fn auth_error(&mut self) -> i32 {
         eprintln!("Error: not logged in. Please run `kimi login`.");
         1
@@ -729,6 +735,16 @@ pub fn fake_agent_main(args: &[String]) -> i32 {
         "external" => external(rest),
         "acp" => acp(rest),
         "codex" => {
+            if rest.first().map(String::as_str) == Some("debug") && rest.get(1).map(String::as_str) == Some("models") {
+                out(&json!({"models": [
+                    {"slug": "fake-codex-hidden", "display_name": "Hidden", "visibility": "hide", "priority": 0},
+                    {"slug": "fake-codex-large", "display_name": "Fake Large", "default_reasoning_level": "medium",
+                     "supported_reasoning_levels": [{"effort": "low"}, {"effort": "medium"}, {"effort": "xhigh"}], "visibility": "list", "priority": 2},
+                    {"slug": "fake-codex-small", "display_name": "Fake Small", "default_reasoning_level": "low",
+                     "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}], "visibility": "list", "priority": 1}
+                ]}).to_string());
+                return 0;
+            }
             if rest.first().map(String::as_str) != Some("exec") {
                 return 0; // `login status` and friends
             }
@@ -737,6 +753,12 @@ pub fn fake_agent_main(args: &[String]) -> i32 {
             perform(&script, &mut Codex { last_message: flag(rest, &["-o", "--output-last-message"]) })
         }
         "agy" => {
+            if rest.first().map(String::as_str) == Some("models") {
+                eprintln!("Fetching available models...");
+                out("fake-agy-high\tFake Agy (High)");
+                out("fake-agy-low\tFake Agy (Low)");
+                return 0;
+            }
             let Some(prompt) = flag(rest, &["-p"]) else {
                 return 0;
             };
@@ -748,6 +770,13 @@ pub fn fake_agent_main(args: &[String]) -> i32 {
                 out("Logged in as fake@example.invalid");
                 return 0;
             }
+            if rest.first().map(String::as_str) == Some("models") {
+                out("Available models:");
+                out("");
+                out("  - auto (current)");
+                out("  - fake-composer - Fake Composer");
+                return 0;
+            }
             let prompt = rest.last().cloned().unwrap_or_default();
             let script = Script::new("cursor", prompt, flag(rest, &["--workspace"]), flag(rest, &["--resume"]), rest);
             perform(&script, &mut Cursor { session: String::new() })
@@ -756,11 +785,17 @@ pub fn fake_agent_main(args: &[String]) -> i32 {
             let Some(prompt) = flag(rest, &["-p"]) else {
                 return 0;
             };
-            let script = Script::new("kimi", prompt, None, None, rest);
-            perform(&script, &mut Kimi)
+            let script = Script::new("kimi", prompt, None, flag(rest, &["-S", "--session"]), rest);
+            perform(&script, &mut Kimi { session: String::new() })
         }
         "pi" => {
             if rest.first().map(String::as_str) == Some("auth") {
+                return 0;
+            }
+            if rest.first().map(String::as_str) == Some("--list-models") {
+                out("provider    model           context  max-out  thinking  images");
+                out("openrouter  vendor/fake-a   200K     32K      yes       no");
+                out("deepseek    fake-deep       128K     8K       no        no");
                 return 0;
             }
             let prompt = rest.last().cloned().unwrap_or_default();

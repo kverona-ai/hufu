@@ -4,9 +4,13 @@
 //! pi has no permission system. `full-access` is its natural tier; `read-only` is offered by
 //! restricting pi to its `read` tool with `--tools`.
 
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::time::Duration;
+
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
-    RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage, json::instruct_json,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ModelInfo, ModelList,
+    ProbeResult, Profile, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage, json::instruct_json,
 };
 use serde_json::Value;
 
@@ -19,7 +23,43 @@ const FORBIDDEN: &[&str] =
 
 pub struct Pi;
 
-/// The API-key variable pi reads for a provider, as listed in pi's provider documentation.
+/// The API-key variable pi reads for a provider, as listed in pi's provider documentation
+/// (`docs.pi.dev/latest/providers`, checked on 2026-11-20 against pi 1.6). Matched by prefix, so
+/// a more specific id must come before a shorter one that starts it.
+/// Rows of `pi --list-models`. A table with `provider` and `model` columns gives the model id
+/// (prefixed with its provider when the profile names none) and whether it thinks; other output is
+/// read one model per line.
+fn parse_models(text: &str, provider: Option<&str>) -> Vec<ModelInfo> {
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let header: Option<Vec<String>> =
+        lines.clone().next().map(|h| h.split_whitespace().map(|c| c.to_ascii_lowercase()).collect());
+    let column = |name: &str| header.as_ref().and_then(|h| h.iter().position(|c| c == name));
+    let (Some(p), Some(m)) = (column("provider"), column("model")) else {
+        return common::parse_model_lines(text);
+    };
+    let thinking = column("thinking");
+    lines.next();
+    let mut out = Vec::new();
+    for row in lines {
+        let cells: Vec<&str> = row.split_whitespace().collect();
+        let (Some(row_provider), Some(model)) = (cells.get(p), cells.get(m)) else { continue };
+        if provider.is_some_and(|want| !row_provider.eq_ignore_ascii_case(want)) {
+            continue;
+        }
+        let id = if provider.is_some() { model.to_string() } else { format!("{row_provider}/{model}") };
+        let thinks = thinking
+            .and_then(|t| cells.get(t))
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "✓"));
+        out.push(ModelInfo {
+            id,
+            description: thinks
+                .map(|t| if t { "thinking model".to_string() } else { "no thinking levels".to_string() }),
+            ..ModelInfo::default()
+        });
+    }
+    out
+}
+
 pub fn provider_key_var(provider: &str) -> Option<&'static str> {
     let p = provider.to_ascii_lowercase();
     let table: &[(&str, &str)] = &[
@@ -31,6 +71,7 @@ pub fn provider_key_var(provider: &str) -> Option<&'static str> {
         ("moonshot", "MOONSHOT_API_KEY"),
         ("anthropic", "ANTHROPIC_API_KEY"),
         ("openai", "OPENAI_API_KEY"),
+        ("google-vertex", "GOOGLE_CLOUD_API_KEY"),
         ("google", "GEMINI_API_KEY"),
         ("gemini", "GEMINI_API_KEY"),
         ("mistral", "MISTRAL_API_KEY"),
@@ -39,8 +80,15 @@ pub fn provider_key_var(provider: &str) -> Option<&'static str> {
         ("xai", "XAI_API_KEY"),
         ("fireworks", "FIREWORKS_API_KEY"),
         ("together", "TOGETHER_API_KEY"),
+        ("minimax-cn", "MINIMAX_CN_API_KEY"),
         ("minimax", "MINIMAX_API_KEY"),
+        ("qwen-token-plan-cn", "QWEN_TOKEN_PLAN_CN_API_KEY"),
         ("qwen", "QWEN_TOKEN_PLAN_API_KEY"),
+        ("xiaomi", "XIAOMI_API_KEY"),
+        ("opencode", "OPENCODE_API_KEY"),
+        ("baseten", "BASETEN_API_KEY"),
+        ("radius", "RADIUS_API_KEY"),
+        ("typesafe", "TYPESAFE_API_KEY"),
         ("huggingface", "HF_TOKEN"),
         ("nvidia", "NVIDIA_API_KEY"),
     ];
@@ -120,6 +168,7 @@ impl Adapter for Pi {
             notes: vec![
                 "pi has no permission system: full-access is unrestricted, so run it with worktree isolation or in a container".into(),
                 "read-only limits pi to its `read` tool (`--tools read --no-mcp`)".into(),
+                "effort is `--thinking`, from off through minimal (native:minimal) to max; pi clamps a level to what the model supports".into(),
                 "workspace-write is not available: pi cannot confine edits to the workspace".into(),
             ],
         }
@@ -167,6 +216,24 @@ impl Adapter for Pi {
             None => req.prompt.clone(),
         });
         Ok(plan)
+    }
+
+    /// `pi --list-models [search]` lists the models pi knows, narrowed to the profile's provider.
+    fn models(&self, profile: &Profile, env: &BTreeMap<String, String>, cwd: &Path) -> Result<ModelList, AdapterError> {
+        let mut args = vec!["--list-models"];
+        if let Some(provider) = &profile.provider {
+            args.push(provider);
+        }
+        let (out, from) = common::run_listing(profile, DEFAULT, env, cwd, &args, Duration::from_secs(60))?;
+        let models = parse_models(&out, profile.provider.as_deref());
+        if models.is_empty() {
+            return Err(AdapterError(format!("{from} listed no models")));
+        }
+        let mut notes = vec!["effort is pi's `--thinking`; pi lowers a level the model lacks to one it has".into()];
+        if profile.provider.is_none() {
+            notes.push("this profile sets no provider, so ids are `provider/model`; set `provider` and use the bare id instead".into());
+        }
+        Ok(ModelList { source: "agent".into(), from, models, notes, ..ModelList::default() })
     }
 
     fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome {
@@ -329,6 +396,14 @@ mod tests {
         req.permission = Tier::WorkspaceWrite;
         assert!(Pi.plan(&p, &req).is_err());
         assert_eq!(provider_key_var("deepseek"), Some("DEEPSEEK_API_KEY"));
+        let table = "provider    model              context  max-out  thinking  images\nopenrouter  vendor/model-a     200K     32K      yes       no\ndeepseek    deepseek-v4        128K     8K       no        no\n";
+        let all = parse_models(table, None);
+        assert_eq!(all[0].id, "openrouter/vendor/model-a");
+        assert_eq!(all[1].description.as_deref(), Some("no thinking levels"));
+        let one = parse_models(table, Some("deepseek"));
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].id, "deepseek-v4");
+        assert_eq!(parse_models("deepseek-v4\n", None)[0].id, "deepseek-v4");
         assert_eq!(provider_key_var("zai-coding-cn"), Some("ZAI_CODING_CN_API_KEY"));
     }
 

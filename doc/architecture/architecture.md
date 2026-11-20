@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented |
+| **Status** | Describes Hufu 1.0 as implemented |
 | **Last updated** | 2026-11-12 (as built: optional daemon, MCP server in the core, accounts and pools, setup, three platforms) |
 | **Related** | [Requirements](../requirements/requirements.md), [Technical design](../technical/technical-design.md), [ADRs](../adr/README.md) |
 

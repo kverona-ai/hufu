@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented. Per-agent details follow each vendor's documentation as read on 2026-11-12 and have not been run against real accounts by this project |
-| **Last updated** | 2026-11-12 (the interface as built; Claude Code, Kimi and pi tiers; third-party adapters; failure reasons) |
+| **Status** | Describes Hufu 1.0 as implemented. Per-agent details follow each vendor's documentation as read on 2026-11-20, checked against the installed Codex, Claude Code and Antigravity CLIs on one machine (help and model lists only); no job has been run against real accounts by this project |
+| **Last updated** | 2026-11-20 (`xhigh`; `models()` and `hufu models`; `cursor-agent`; `agy acp` and `--mode accept-edits`; Claude Code `--permission-prompts none`; Kimi print-mode resume) |
 | **Related** | [Agent landscape](../research/agent-landscape.md), [Technical design](technical-design.md), [ADR-0002](../adr/0002-acp-first-cli-fallback.md), [ADR-0005](../adr/0005-explicit-permission-and-effort-mapping.md), [ADR-0009](../adr/0009-synchronous-core-and-own-protocol-clients.md) |
 
 An adapter is the only code that knows how one kind of agent is driven. This document defines what
@@ -12,7 +12,8 @@ the per-agent notes.
 
 The evidence marks (✅ ◐ ⚠️ ❓) are those defined in the
 [agent landscape](../research/agent-landscape.md). The quickest way to see what Hufu will run for
-your own profile is `hufu run -a <profile> -p <tier> -e <effort> --dry-run "x"`.
+your own profile is `hufu run -a <profile> -p <tier> -e <effort> --dry-run "x"`, and the quickest
+way to see which models and levels the agent itself offers is `hufu models <profile>`.
 
 ## 1. Interface
 
@@ -47,6 +48,12 @@ pub trait Adapter: Send + Sync {
     /// call; they are returned in the outcome.
     fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken)
         -> RunOutcome;
+
+    /// The models the agent offers this profile, asked from the agent itself where it can say
+    /// (`hufu models`). Runs only a listing command or an ACP handshake, never a prompt. The
+    /// default answer is an error saying the adapter cannot list models.
+    fn models(&self, profile: &Profile, env: &BTreeMap<String, String>, cwd: &Path)
+        -> Result<ModelList, AdapterError>;
 }
 
 pub struct Capabilities {
@@ -90,6 +97,14 @@ pub struct RunOutcome {
     pub exit_code: Option<i32>,
     pub retryable: bool,
     pub touched_paths: Vec<String>,           // paths the agent said it changed
+}
+
+pub struct ModelList {
+    pub source: String,                       // agent | config | documentation
+    pub from: String,                         // the command run, file read or page copied
+    pub models: Vec<ModelInfo>,               // id, name, efforts, default_effort, default, description
+    pub efforts: Vec<String>,                 // agent values for every model, when stated once
+    pub notes: Vec<String>,
 }
 ```
 
@@ -167,10 +182,10 @@ fake agent `hufu __fake-agent external` is a complete example.
 | Agent (adapter) | `read-only` | `workspace-write` | `full-access` |
 |---|---|---|---|
 | **Codex** (`codex-cli`) ◐ | `--sandbox read-only` | `--sandbox workspace-write` | `--dangerously-bypass-approvals-and-sandbox` |
-| **Antigravity** (`agy-cli`) ✅ | `--mode plan --sandbox` | `--sandbox`: workspace edits are applied, commands need an allow rule in agy's own settings or are soft-denied | `--dangerously-skip-permissions` |
-| **Cursor** (`cursor-cli`) ✅ | `--mode plan` | Print mode without `--force`: workspace edits applied, other actions rejected | `--force` |
-| **Claude Code** (`claude-cli`) ◐ | `--permission-mode plan` | `--permission-mode acceptEdits`: file edits allowed, other tools need Claude Code's own allow rules | `--dangerously-skip-permissions` |
-| **Kimi Code** (`kimi-cli`) ✅ | Not available | Not available | Print mode, which approves every tool call |
+| **Antigravity** (`agy-cli`) ✅ | `--mode plan --sandbox` | `--mode accept-edits --sandbox`: workspace edits are applied, commands need an allow rule in agy's own settings or are soft-denied | `--dangerously-skip-permissions` |
+| **Cursor** (`cursor-cli`) ✅ | `--mode plan` | Print mode without `--force`: workspace edits applied, other actions rejected. Refused when `cli-config.json` sets `approvalMode: unrestricted` | `--force` |
+| **Claude Code** (`claude-cli`) ✅ | `--permission-mode plan --permission-prompts none` | `--permission-mode acceptEdits --permission-prompts none`: file edits allowed, other tools need Claude Code's own allow rules | `--dangerously-skip-permissions` |
+| **Kimi Code** (`kimi-cli`) ✅ | Not available | Not available | Print mode, which approves every tool call that `[[permission.rules]]` do not deny |
 | **pi** (`pi`) ✅ | `--tools read --no-mcp`: only pi's `read` tool is offered | Not available: pi cannot confine edits to the workspace | No restriction: pi has no permission system |
 | **ACP agent** (`acp`), `verified` | Allow `read`, `search`, `think`; reject the rest | Also allow `edit`, `delete`, `move` for paths inside the workspace, and `execute` for commands starting with a prefix in `allow_execute` | Allow every request |
 | **ACP agent** (`acp`), not verified | Not available | Not available | Allow every request |
@@ -207,24 +222,33 @@ with reason `permission_denied`; the default is `false`.
 
 ## 4. Effort mapping
 
-Hufu's scale is `off`, `low`, `medium`, `high`, `max`, plus `default`, which means "pass nothing and
-let the agent decide".
+Hufu's scale is `off`, `low`, `medium`, `high`, `xhigh`, `max`, plus `default`, which means "pass
+nothing and let the agent decide". `xhigh` joined the scale in 1.0, when Codex, Claude Code,
+Antigravity, Kimi Code and pi had all added it between `high` and `max`.
 
-| Hufu | Codex ◐ `-c model_reasoning_effort=` | Antigravity ✅ `--effort` | Claude Code ◐ `--effort` | Kimi ✅ `KIMI_MODEL_THINKING_EFFORT` | pi ✅ `--thinking` | Cursor | ACP |
+| Hufu | Codex ✅ `-c model_reasoning_effort=` | Antigravity ✅ `--effort` | Claude Code ✅ `--effort` | Kimi ✅ `KIMI_MODEL_THINKING_EFFORT` | pi ✅ `--thinking` | Cursor | ACP |
 |---|---|---|---|---|---|---|---|
 | `off` | n/a | n/a | n/a | n/a | `off` | n/a | The session's `thought_level` option, if advertised, matched by value |
 | `low` | `low` | `low` | `low` | `low` | `low` | n/a | 〃 |
 | `medium` | `medium` | `medium` | `medium` | `medium` | `medium` | n/a | 〃 |
 | `high` | `high` | `high` | `high` | `high` | `high` | n/a | 〃 |
-| `max` | `max` | n/a | `max` | `max` | `max` | n/a | 〃 |
+| `xhigh` | `xhigh` | `xhigh` | `xhigh` | `xhigh` | `xhigh` | n/a | 〃 (also `extra-high`, `extra_high`) |
+| `max` | `max` | `max` | `max` | `max` | `max` | n/a | 〃 (also `maximum`) |
 | `default` | (omit) | (omit) | (omit) | (unset) | (omit) | (omit) | (leave unset) |
 
-- **n/a means an error**, not a silent skip. A task asking Antigravity for `max` fails validation.
-- A profile may set `effort_fallback: nearest` to accept the closest supported level instead. The
-  substitution is then recorded as a warning in the result.
-- Agents with more native levels than Hufu's scale (Codex `xhigh` and `ultra`, pi `minimal` and
-  `xhigh`) can be reached with `effort: native:<value>`, which is passed through verbatim and
-  validated only by the agent.
+- **n/a means an error**, not a silent skip. A task asking Codex for `off` fails validation.
+- A profile may set `effort_fallback: nearest` to accept the closest supported level instead (a tie
+  goes to the lower level). The substitution is then recorded as a warning in the result.
+- **The agent's levels differ per model.** The table says what Hufu passes; whether the model
+  accepts it is the agent's business. Codex refuses a level its model lacks; Claude Code, pi and
+  Antigravity fall back to a level the model has. `hufu models <profile>` shows each model's
+  levels where the agent lists them.
+- Native levels beyond Hufu's scale (Codex `ultra`, which hands the work to subagents; Claude
+  Code `ultracode`; pi `minimal`) are reached with `effort: native:<value>`, passed through verbatim
+  and validated only by the agent.
+- Kimi's variable applies only to a model the profile defines with `KIMI_MODEL_NAME`. Other Kimi
+  print-mode profiles have no per-run effort: the level comes from `[thinking] effort` in Kimi's
+  `config.toml`, or use `kimi-acp`, which sets it per session.
 - Cursor has no effort control; reasoning strength is selected through the model id.
 - For ACP the levels are only known once a session is open, so a level the agent does not offer
   fails the job at start rather than at submission.
@@ -249,6 +273,13 @@ codex exec --cd <cwd> --sandbox <tier> [-m <model>] [-c model_reasoning_effort="
   only when the workspace is not a repository and says so in a note.
 - Resume: `codex exec resume <SESSION_ID>`. Structured output: `--output-schema`.
 - An attached MCP server is passed as `-c mcp_servers.<name>.command=...` overrides.
+- Since Codex 0.169, `codex exec` keeps project configuration and project MCP servers off in a
+  directory it does not trust. Trust it once with `codex exec --trust`, or add `--trust` to the
+  profile's `args`.
+- Models: `hufu models` runs `codex debug models` and lists the catalog's visible models with their
+  effort levels and default level. `gpt-6.2-sol` is Codex's default; `gpt-6.2-astra` is meant for
+  demanding work.
+- `--approve-for-me` and `--not-so-yolo` change approvals and are refused in a profile's `args`.
 - Account: `home` becomes `CODEX_HOME`. Auth: saved login, or `CODEX_API_KEY` if the profile passes
   it through.
 
@@ -257,11 +288,19 @@ codex exec --cd <cwd> --sandbox <tier> [-m <model>] [-c model_reasoning_effort="
 Evidence: ✅ vendor documentation.
 
 ```text
-agy -p <prompt> --output-format stream-json [--mode plan] [--sandbox | --dangerously-skip-permissions] \
+agy -p <prompt> --output-format stream-json [--mode plan|accept-edits --sandbox | --dangerously-skip-permissions] \
   [--model <slug>] [--effort <level>] [--json-schema <file>] [--conversation <id>]
+agy acp                                                      # preset `agy-acp`
 ```
 
-- Only surface: CLI. No ACP entry point was found.
+- Two surfaces: the headless CLI (preset `agy`) and, since `agy acp` appeared, ACP (preset
+  `agy-acp`) when permission answers per action are wanted.
+- Every tier names its mode, because the mode a run gets without `--mode` follows the user's
+  `agentMode` setting. `--settings` can widen permissions per run and is refused in `args`.
+- Models: `hufu models` runs `agy models` (one `slug<TAB>name` line each). A slug that ends in a
+  level (`gemini-4-neon-high`) already picks the effort; `--effort` switches the current model to
+  its variant, `xhigh` and `max` only where the model publishes them, and Orchestrator models take
+  none.
 - **No cwd flag.** The adapter sets the child process's working directory.
 - **stdin is closed.** An open stdin pipe is reported to hang some versions.
 - **Empty stdout without a TTY** is a reported bug
@@ -284,16 +323,23 @@ agy -p <prompt> --output-format stream-json [--mode plan] [--sandbox | --dangero
 Evidence: ✅ vendor documentation.
 
 ```text
-agent -p --output-format stream-json --workspace <cwd> --trust [--mode plan | --force] \
+cursor-agent -p --output-format stream-json --workspace <cwd> --trust [--mode plan | --force] \
   [--model <id>] [--resume <chatId>] <prompt>
 ```
 
-- Both surfaces work: the headless CLI (preset `cursor`), and ACP (`agent acp`, preset
+- **The program is `cursor-agent`.** Cursor installs the same binary as `agent` too, but other
+  CLIs (the Grok CLI) also install an `agent`. Without a `command` in the profile, Hufu runs
+  `cursor-agent` when it is on PATH and otherwise `agent`, and `probe` reports an `agent` whose
+  `--version` names another CLI as not installed.
+- Both surfaces work: the headless CLI (preset `cursor`), and ACP (`cursor-agent acp`, preset
   `cursor-acp`) when permission answers per action are wanted.
+- `workspace-write` is refused when Cursor's `cli-config.json` sets `approvalMode: unrestricted`,
+  which makes print mode run everything as `--force` does.
 - Stream events: `system`, `user`, `assistant`, `tool_call`, `result`. Thinking is not emitted.
-- Structured output is by instruction. Usage is not reported.
+  The `result` event's `usage` (with `reasoningTokens`) is reported.
+- Structured output is by instruction. Models: `hufu models` runs `cursor-agent models`.
 - Account: `home` becomes `CURSOR_CONFIG_DIR`. Auth: `CURSOR_API_KEY` if passed through, or a saved
-  `agent login`.
+  `cursor-agent login`.
 
 ### 5.4 Kimi Code
 
@@ -305,9 +351,15 @@ kimi acp                                                       # preset `kimi-ac
 ```
 
 - Print mode always approves, so it supports only `full-access`. ACP is the way to lower tiers.
-- Effort is set through the `KIMI_MODEL_THINKING_EFFORT` variable.
-- Print mode does not report a session id, so it cannot resume, and it reads MCP servers only from
-  its own settings file; both are available over ACP.
+- Effort is set through `KIMI_MODEL_THINKING_EFFORT`, which Kimi reads only for a model defined by
+  `KIMI_MODEL_NAME`. A profile that does not define its model that way offers no effort levels:
+  Kimi takes the level from `[thinking] effort` in its `config.toml`.
+- The stream ends with a `session.resume_hint` line carrying the session id; a follow-up runs
+  `kimi -S <id> -p ...`. Exit code `4` (session held by another process) fails the job with a
+  clear message.
+- Print mode reads MCP servers only from its own settings file; over ACP Hufu attaches them.
+- Models: `hufu models` reads the `[models."<alias>"]` tables and `default_model` of Kimi's
+  `config.toml`, with each model's `support_efforts`.
 - `kimi acp` not logged in answers `AUTH_REQUIRED` (`-32000`), mapped to `auth_required` with the
   hint `kimi login`.
 - Account: `home` becomes `KIMI_CODE_HOME`.
@@ -327,18 +379,26 @@ pi --mode json [--tools read --no-mcp] [--provider <name>] [--model <id>] [--thi
 - `full-access` is unrestricted; pi's own advice is to run it in a container. `read-only` limits pi
   to its `read` tool.
 - Non-interactive modes show no project trust prompt.
+- `--thinking` with a level the model lacks is clamped by pi to one it has.
+- Models: `hufu models` runs `pi --list-models <provider>`.
 - Resume: `--session <id>`. Account: `home` becomes `PI_CODING_AGENT_DIR`.
 - pi itself requires Node.js ≥ 22.19. Hufu does not.
 
 ### 5.6 Claude Code
 
-Evidence: ◐ vendor documentation.
+Evidence: ✅ vendor documentation and `claude --help` (2.1.328).
 
 ```text
-claude -p --output-format stream-json --verbose --permission-mode <plan|acceptEdits> | \
-  --dangerously-skip-permissions [--model <id>] [--effort <level>] [--json-schema <schema>] \
-  [--resume <id>] [--mcp-config <json>]
+claude -p --output-format stream-json --verbose \
+  (--permission-mode <plan|acceptEdits> --permission-prompts none | --dangerously-skip-permissions) \
+  [--model <alias or id>] [--effort <level>] [--json-schema <schema>] [--resume <id>] [--mcp-config <json>]
 ```
+
+- `--permission-prompts none` needs Claude Code 2.1.259 or later; it makes a call that would need
+  approval a denial instead of a prompt, whatever mode a print-mode run would otherwise start in.
+- Models: an alias (`best`, `fable`, `opus`, `sonnet`, `haiku`, `opus[1m]`, `sonnet[1m]`,
+  `opusplan`) or a full id. Claude Code cannot list models, so `hufu models` shows Hufu's copy of
+  its model configuration page.
 
 - The prompt is written to stdin. Present so that Claude Code can be an executor, or the advisor of
   a mission, under any caller.
@@ -368,8 +428,10 @@ Flow:
 4. `session/new` with the workspace as `cwd` and any MCP servers Hufu attaches, or `session/load`
    / `session/resume` for a follow-up, depending on what the agent advertises.
 5. Read `configOptions`. Set the option of category `model` and the option of category
-   `thought_level` with `session/set_config_option` when the task asks for them. Where the agent
-   advertises a plan-like mode, select it for `read-only` as a second control.
+   `thought_level` with `session/set_config_option` when the task asks for them. An option without
+   a category is matched by its id (`model`; `thinking`, `effort`, `reasoning_effort` or
+   `reasoning` for the thought level). Where the agent advertises a plan-like mode, select it for
+   `read-only` as a second control.
 6. `session/prompt`. Translate `session/update` notifications into normalized events; chunks of the
    answer are joined into the final message.
 7. Answer every `session/request_permission` from the tier policy in [section 3.1](#31-mapping).
@@ -377,9 +439,14 @@ Flow:
    `max_turn_requests` are failed with the reason recorded.
 9. On cancel: send `session/cancel`, give the agent the grace period, then stop the process tree.
 
+`hufu models` runs steps 1 to 4 without a prompt and lists the values of the `model` option (or the
+older `models` field of the `session/new` answer) and of the `thought_level` option, then ends the
+agent.
+
 Agents expected to work through this profile with no adapter code: Gemini CLI, OpenCode, Goose,
-Qwen Code, Cursor, Kimi Code, pi (through `pi-acp`), Codex (through `codex-acp`), Claude (through
-`claude-agent-acp`). None of them has been run against this client yet.
+Qwen Code, Cursor, Kimi Code, Antigravity (`agy acp`), pi (through `pi-acp`), Codex (through
+`codex-acp`), Claude (through `claude-agent-acp`). None of them has been run against this client
+yet.
 
 ## 6. Conformance suite
 

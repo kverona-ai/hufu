@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented |
+| **Status** | Describes Hufu 1.0 as implemented |
 | **Last updated** | 2026-11-12 (rewritten after implementation: synchronous core, own protocol clients, accounts and pools, setup, daemon, three platforms) |
 | **Related** | [Architecture](../architecture/architecture.md), [Adapter contract](adapter-contract.md), [Requirements](../requirements/requirements.md), [User guide](../guide/user-guide.md) |
 
@@ -681,8 +681,9 @@ The daemon is optional and stateless: everything it knows is in the job store.
 ## 16. Versioning
 
 - The configuration, the task spec and every JSON output carry `version` or `v`, currently `1`.
-- The CLI follows semantic versioning from 1.0. Before that, breaking changes are listed in the
-  release notes. `hufu update` orders versions as Semantic Versioning does, so `0.1.0-alpha.2`
-  comes before `0.1.0-rc.1`, and both come before `0.1.0`.
+- The CLI follows semantic versioning from 1.0.0: a breaking change to a command, a flag, the
+  configuration or a JSON output needs a new major version. (Before 1.0, breaking changes were
+  listed in the release notes.) `hufu update` orders versions as Semantic Versioning does, so `1.1.0-alpha.2`
+  comes before `1.1.0-rc.1`, and both come before `1.1.0`.
 - The agent version an adapter saw is recorded in each job's state and result, so a report about a
   misbehaving agent always says which version it was.

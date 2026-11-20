@@ -1,10 +1,13 @@
 # Contributing to Hufu
 
-Thank you for your interest. Hufu 0.1 is implemented and tested against built-in fake agents. The
-most useful contribution right now is a report from a run against a real agent: what you ran
-(`hufu run ... --dry-run` shows the exact command line), what the agent printed
-(`hufu logs <job> --raw`), and what Hufu made of it (`hufu --json result <job>`). Remove anything
-private from the output first.
+Thank you for your interest. Hufu 1.0 is the first stable release; it is tested against built-in
+fake agents that print what each agent's documentation says. The most useful contribution is a
+report, opened as an [issue](https://github.com/kverona-ai/hufu/issues), from a run against a real
+agent: the agent and its version (`hufu agents --probe`), what you ran (`hufu run ... --dry-run`
+shows the exact command line), what the agent printed (`hufu logs <job> --raw`), and what Hufu made
+of it (`hufu --json result <job>`). For a model or effort problem, add `hufu --json models
+<profile>`. Remove anything private from the output first. Bug reports, questions and ideas are all
+welcome as issues.
 
 ## Where things go
 

@@ -18,9 +18,10 @@ Use the `hufu_*` MCP tools when they are available. The `hufu` command line does
    - `agent`: a profile or pool name from step 1.
    - `permission`: `read-only` (default), `workspace-write`, or `full-access`. Ask for the lowest that works.
    - optional `model` and `effort`, when the user names them or the task calls for it. They apply
-     to this job only and override the profile. Effort is `low`, `medium`, `high`, `max` (`off`
-     where the agent has it); step 1 shows the levels each profile has, and a level it lacks is an
-     error. A model id is passed to the agent as it is.
+     to this job only and override the profile. Effort is `low`, `medium`, `high`, `xhigh`, `max`
+     (`off` where the agent has it); step 1 shows the levels each profile has, and a level it lacks
+     is an error. A model id is passed to the agent as it is; `hufu_models` with the profile name
+     lists the ids and levels the agent itself offers, when you need to pick one.
    - optional `cwd`, `isolation: worktree` (own copy of the repository on its own branch),
      `acceptance` (commands that must exit 0, path rules), `output_schema`, and `dry_run: true`
      to see the command line without starting anything.

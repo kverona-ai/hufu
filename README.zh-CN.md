@@ -9,9 +9,10 @@
 <p align="center">
   <a href="LICENSE"><img alt="许可证：Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-d9931f"></a>
   <a href="https://github.com/kverona-ai/hufu/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kverona-ai/hufu/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="doc/roadmap.md"><img alt="状态：0.1 预发布" src="https://img.shields.io/badge/status-0.1%20pre--release-b3261e"></a>
+  <a href="https://github.com/kverona-ai/hufu/releases/latest"><img alt="版本：1.0.0" src="https://img.shields.io/badge/release-1.0.0-2e7d32"></a>
   <a href="doc/deployment/deployment.md"><img alt="Linux、macOS、Windows" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-4b6bfb"></a>
   <a href="doc/adr/0007-implement-in-rust.md"><img alt="使用 Rust 编写" src="https://img.shields.io/badge/built%20with-Rust-b7410e"></a>
+  <a href="https://github.com/kverona-ai/hufu/issues"><img alt="欢迎提 issue" src="https://img.shields.io/badge/issues-welcome-8e44ad"></a>
 </p>
 
 # Hufu 虎符
@@ -20,12 +21,9 @@
 advisor，任意其他 Agent 都可以被派去执行任务。无论两端是哪些 Agent，用的都是同一份任务规格、同一组
 命令和同一种结果格式。
 
-> [!NOTE]
-> **当前状态：0.1 预发布。** 本文描述的功能都已实现，并在 Linux、macOS、Windows 三个平台上用内置的
-> 模拟 Agent（每种适配器一个）做了端到端测试。各适配器是按各 Agent 的最新文档编写的，本项目的 CI
-> **还没有**用真实账号跑过，首次对接真实 Agent 时可能遇到问题，欢迎反馈。出于同样的原因，目前发布的
-> 都是预发布版本（`0.1.0-alpha.N`）。每个版本都带有六个平台的预编译程序；下载不到时，安装脚本会改为
-> 从源码构建。
+虎符 1.0 可以驱动 Codex、Claude Code、Antigravity、Cursor、Kimi Code、pi（以及通过 pi 接入的
+OpenRouter、DeepSeek、Z.ai 等模型 API），以及任何支持 Agent Client Protocol 的 Agent。它在 Linux、
+macOS、Windows 上都是一个自包含的程序，每个版本都带有六个平台的预编译程序。
 
 ## 为什么要做
 
@@ -109,7 +107,7 @@ $ hufu update --check    # 只检查有没有新版本
 
 `hufu update` 会下载最新版本，核对 SHA-256 校验和，确认新程序能在本机启动，然后才替换旧程序。如果
 守护进程原本在运行，它会重启守护进程，最后运行一遍 `hufu doctor`。正在运行的作业继续用它们启动时的
-版本跑完，配置和作业记录都不会被改动。`--version v0.2.0` 安装指定版本，想退回旧版本也用它。也可以
+版本跑完，配置和作业记录都不会被改动。`--version v1.0.0` 安装指定版本，想退回旧版本也用它。也可以
 直接对你的 Agent 说"更新 Hufu"。更新之后，重启已接入虎符的 Agent，它们才会用上新版本。
 
 ## 工作方式
@@ -161,7 +159,7 @@ flowchart LR
 | 👥 **多个执行者，多个账号** | 可以配置任意多个 profile，包括同一个 Agent 的多个账号。账号池可以故障切换或轮流使用。见[任务派给谁](#任务派给谁) |
 | 💾 **作业不随会话消失** | 状态、日志和结果都在磁盘上。会话丢了，工作还在 |
 | 🔒 **显式的权限** | 三个档位：`read-only`、`workspace-write`、`full-access`，按 Agent 逐一翻译。Agent 做不到的档位直接拒绝，绝不悄悄放宽；只读作业如果改了文件，直接判失败 |
-| 🎚️ **按任务指定模型和思考强度** | 模型和思考强度可以按任务、按 profile 指定，也可以设全局默认。思考强度用一套刻度映射到各 Agent 自己的控制方式；映射不了就报错，而不是悄悄忽略。见[怎样设置](#指定模型和思考强度) |
+| 🎚️ **按任务指定模型和思考强度** | 模型和思考强度可以按任务、按 profile 指定，也可以设全局默认。思考强度用一套从 `low` 到 `xhigh`、`max` 的刻度映射到各 Agent 自己的控制方式；映射不了就报错，而不是悄悄忽略。可用的模型由虎符直接问各 Agent。见[怎样设置](#指定模型和思考强度) |
 | ✅ **合符检查** | 退出码为 `0` 不等于成功。工作是否被接受由验收条件决定 |
 | 🔌 **MCP 接入，ACP 接出** | 任何支持 MCP 的 Agent 都能驱动虎符，甚至替你配置虎符。任何支持 ACP 的 Agent 写几行配置就能被驱动 |
 | 🖥️ **可路由的 computer use** | 任务可以被授予操作桌面应用的权限。具体由谁来操作可以配置：单独的操作者 profile，或任何支持 computer use 的执行者。必须有显式授权 |
@@ -227,25 +225,32 @@ capabilities:
 
 ## 支持的 Agent
 
-| Agent | 适配器 | 虎符的驱动方式 | 支持的档位 |
-|---|---|---|---|
-| Codex（OpenAI） | `codex-cli` | `codex exec --json` | 全部三档 |
-| Antigravity（Google） | `agy-cli` | `agy -p` | 全部三档 |
-| Cursor | `cursor-cli` | `agent -p --output-format stream-json` | 全部三档 |
-| Claude Code（Anthropic） | `claude-cli` | `claude -p --output-format stream-json` | 全部三档 |
-| Kimi Code（Moonshot） | `kimi-cli` | print 模式 | 仅 `full-access` |
-| pi，以及通过它接入的 OpenRouter、DeepSeek、Z.ai、Kimi | `pi` | JSON 模式 | `read-only`、`full-access` |
-| Cursor、Kimi Code、Gemini CLI、OpenCode、Goose、Qwen Code 等 ACP Agent | `acp` | Agent Client Protocol v1，每一次权限请求都由虎符回答 | 标记为已核实之前只有 `full-access`，之后全部三档 |
-| 其他任何程序 | `external` | 你自己写的适配器程序，走一个很小的 JSON 协议 | 由它自己声明 |
+| Agent | 适配器 | 虎符的驱动方式 | 支持的档位 | 模型列表来自 |
+|---|---|---|---|---|
+| Codex（OpenAI） | `codex-cli` | `codex exec --json` | 全部三档 | `codex debug models` |
+| Claude Code（Anthropic） | `claude-cli` | `claude -p --output-format stream-json` | 全部三档 | 虎符抄录的 Claude Code 模型文档 |
+| Antigravity（Google） | `agy-cli` | `agy -p --output-format stream-json` | 全部三档 | `agy models` |
+| Cursor | `cursor-cli` | `cursor-agent -p --output-format stream-json` | 全部三档 | `cursor-agent models` |
+| Kimi Code（Moonshot） | `kimi-cli` | print 模式，可续接会话 | 仅 `full-access` | Kimi 的 `config.toml` |
+| pi，以及通过它接入的 OpenRouter、DeepSeek、Z.ai、Kimi、Qwen、MiniMax 等 | `pi` | JSON 模式 | `read-only`、`full-access` | `pi --list-models` |
+| Kimi Code、Antigravity、Cursor、Gemini CLI、OpenCode、Goose、Qwen Code 等 ACP Agent | `acp` | Agent Client Protocol v1，每一次权限请求都由虎符回答 | 标记为已核实之前只有 `full-access`，之后全部三档 | 会话里的模型选项 |
+| 其他任何程序 | `external` | 你自己写的适配器程序，走一个很小的 JSON 协议 | 由它自己声明 | 无 |
 
-`hufu agents` 会按你自己的配置列出这张表，`hufu agents --probe` 还会检查是否已安装、已登录。每个
-Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/research/agent-landscape.md)里。
+每种都有现成的预设（`codex`、`claude`、`agy`、`cursor`、`kimi`、`pi`，以及走 ACP 的 `kimi-acp`、
+`agy-acp`、`cursor-acp`），装好的 Agent 不用写配置就能用。`hufu agents` 列出你自己的 profile 能做
+什么，`hufu agents --probe` 还会检查是否已安装、已登录，`hufu models <profile>` 列出 Agent 自己提供的
+模型和思考强度档位。
+
+各适配器以 2026 年 11 月 20 日各 Agent 的官方文档和更新日志为准，模型列表的格式也在已安装的 Codex、
+Claude Code、Antigravity 上核对过。每个 Agent 支持什么、我们对此有多大把握，记录在
+[Agent 调研](doc/research/agent-landscape.md)里。
 
 ## 在任何 Agent 里使用
 
 `hufu setup` 会把虎符的 MCP 服务注册到 Claude Code、Codex、Cursor、Kimi Code 和 Antigravity
-（其他宿主可以用 `hufu setup --agent generic --print` 拿到配置片段）。接入后的 Agent 会多出 22 个
-工具：派发和跟踪作业、运行 mission，以及读取和修改虎符的配置，包括添加 profile 和账号池。
+（其他宿主可以用 `hufu setup --agent generic --print` 拿到配置片段）。接入后的 Agent 会多出 23 个
+工具：派发和跟踪作业、查询各 Agent 的模型、运行 mission，以及读取和修改虎符的配置，包括添加 profile
+和账号池。
 "把我的第二个 Codex 账号加进虎符，和现有的组成一个池"这样的话，可以直接对其中任何一个 Agent 说。
 
 接下来的两节讲在 Agent 里最常被问到的两件事：怎样[指定执行者的模型和思考强度](#指定模型和思考强度)，
@@ -271,16 +276,28 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 这是最常用的方式。对任何已接入虎符的 Agent（Claude Code、Codex、Cursor 等）直接说你想要什么，
 它会替你发起工具调用。
 
+**有哪些模型可选？**
+
+> 虎符里的 Codex 能用哪些模型，各有哪些思考强度？
+
+```jsonc
+// hufu_models
+{ "agent": "codex" }
+```
+
+虎符会直接问 Agent（这里是运行 `codex debug models`），所以列出的是你的账号实际能用的模型 id，每个都
+带着它的思考强度档位和默认档位，另外还列出虎符对这个 profile 接受哪些 effort 值。
+
 **只针对一个任务。**
 
-> 让 Codex 检查 src/auth 里有没有竞态问题，用 gpt-6.1-sol，思考强度 high。
+> 让 Codex 检查 src/auth 里有没有竞态问题，用 gpt-6.2-sol，思考强度 high。
 
 ```jsonc
 // hufu_submit
 {
   "agent": "codex",
   "prompt": "检查 src/auth 里的竞态问题，逐条给出文件和行号。",
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "effort": "high"
 }
 ```
@@ -288,7 +305,7 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 **针对某个执行者的所有任务。** 给这个组合起个名字，存成一个 profile。它的描述（description）
 之后会被你的 Agent 或 mission 的 advisor 读到，用来决定任务派给谁：
 
-> 在虎符里加一个 profile，叫 codex-deep：Codex 配 gpt-6.1-sol，思考强度 max，用来做困难的
+> 在虎符里加一个 profile，叫 codex-deep：Codex 配 gpt-6.2-astra，思考强度 xhigh，用来做困难的
 > 设计和排错工作。
 
 ```jsonc
@@ -297,8 +314,8 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
   "name": "codex-deep",
   "profile": {
     "adapter": "codex-cli",
-    "model": "gpt-6.1-sol",
-    "effort": "max",
+    "model": "gpt-6.2-astra",
+    "effort": "xhigh",
     "description": "困难的设计和排错工作"
   }
 }
@@ -319,36 +336,39 @@ Agent 支持什么、我们对此有多大把握，记录在 [Agent 调研](doc/
 
 ### 思考强度的刻度
 
-所有 Agent 共用一套刻度：`off`、`low`、`medium`、`high`、`max`。`default` 表示什么都不传，交给
-Agent 自己决定；`native:<值>` 表示把 Agent 自己的原生取值原样传过去，例如 Codex 的
-`native:xhigh`。
+所有 Agent 共用一套刻度：`off`、`low`、`medium`、`high`、`xhigh`、`max`。`default` 表示什么都不
+传，交给 Agent 自己决定；`native:<值>` 表示把 Agent 自己的原生取值原样传过去，例如 Codex 的
+`native:ultra`（交给子 Agent 并行处理）或 Claude Code 的 `native:ultracode`。
 
-| Agent | 它有哪些档 | `high` 时虎符传什么 | 模型 |
+| Agent | 它有哪些档 | `xhigh` 时虎符传什么 | 模型示例 |
 |---|---|---|---|
-| Codex | `low` 到 `max` | `-c model_reasoning_effort="high"` | `-m <id>` |
-| Claude Code | `low` 到 `max` | `--effort high` | `--model <id>` |
-| Antigravity | `low` 到 `high` | `--effort high` | `--model <id>` |
-| Kimi Code | `low` 到 `max` | 环境变量 `KIMI_MODEL_THINKING_EFFORT=high` | `-m <id>` |
-| pi | `off` 到 `max` | `--thinking high` | `--model <id>` |
+| Codex | `low` 到 `max` | `-c model_reasoning_effort="xhigh"` | `-m gpt-6.2-sol` |
+| Claude Code | `low` 到 `max` | `--effort xhigh` | `--model opus` |
+| Antigravity | `low` 到 `max` | `--effort xhigh` | `--model <agy models 列出的 slug>` |
+| Kimi Code | profile 用 `KIMI_MODEL_NAME` 定义模型时为 `low` 到 `max`；否则由 Kimi 自己的 `config.toml` 决定 | `KIMI_MODEL_THINKING_EFFORT=xhigh` | `-m kimi-code/k3` |
+| pi | `off` 到 `max` | `--thinking xhigh` | `--model <服务商的模型 id>` |
 | Cursor | 没有 | 不传；思考强度通过模型 id 来选 | `--model <id>` |
 | ACP Agent | 会话建立时 Agent 自己公布的那些 | 一个会话选项 | 一个会话选项 |
 
-两条规则：
+三条规则：
 
 - **Agent 没有的档位会报错**，而且是在启动任何东西之前。在 profile 上设置
   `effort_fallback: nearest` 后，虎符会改用该 Agent 最接近的一档，并在作业的警告里写明。
   `defaults.effort` 要宽松一些：遇到没有这一档的 Agent，就用 Agent 自己的默认值，并给出警告。
-- **模型 id 原样传给 Agent。** 虎符不维护模型列表，这个 id 存不存在由 Agent 自己判断。
+- **具体模型的档位可能比 Agent 少。** Codex 会拒绝模型没有的档位；Claude Code、Antigravity 和 pi
+  会改用模型有的相邻一档。`hufu models` 会列出 Agent 公布的每个模型的档位。
+- **模型 id 原样传给 Agent。** 虎符自己不维护模型列表，这个 id 存不存在由 Agent 判断。
 
 ### 在命令行里
 
 ```console
-$ hufu run -a codex -m gpt-6.1-sol -e high "检查 src/auth 里有没有竞态问题"
-$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.1-sol --effort max \
+$ hufu models codex                                         # Agent 提供哪些模型
+$ hufu run -a codex -m gpt-6.2-sol -e high "检查 src/auth 里有没有竞态问题"
+$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.2-astra --effort xhigh \
     --description "困难的设计和排错工作"
 $ hufu profile set agy --effort-fallback nearest
 $ hufu config set defaults.effort medium
-$ hufu run -a codex -m gpt-6.1-sol -e high --dry-run "x"    # 只打印命令行，不启动
+$ hufu run -a codex -m gpt-6.2-sol -e high --dry-run "x"    # 只打印命令行，不启动
 ```
 
 ## 任务派给谁
@@ -436,7 +456,8 @@ $ hufu run -a codex -m gpt-6.1-sol -e high --dry-run "x"    # 只打印命令行
 | **M4** | 常驻运行：守护进程、并发限制、账号池、MCP 服务 | ✅ 已实现 |
 | **M5** | 工作区之外：computer use 路由 | ✅ 已实现 |
 | **M5 之后** | 自更新（`hufu update`），以及带六个平台预编译程序的版本发布 | ✅ 已实现 |
-| **下一步** | 用真实 Agent 账号做验证，发布第一个正式版本 | ⚪ 待办 |
+| **1.0** | 按各 Agent 最新版本全面更新适配器，新增 `xhigh` 和 `hufu models`，发布第一个正式版 | ✅ 已发布 |
+| **下一步** | 在 CI 里用真实 Agent 账号验证，更多分发渠道（crates.io、Homebrew），接入更多 Agent | ⚪ 待办 |
 
 详见 [doc/roadmap.md](doc/roadmap.md)。
 
@@ -483,9 +504,15 @@ hufu/
 这个项目借用了其中两层意思。**谁持符谁调兵**：advisor 是一个角色，而不是某个固定的程序。
 **合符才算数**：任务规格和执行结果要对得上，工作才会被接受。
 
-## 参与贡献
+## 欢迎提 issue 和参与贡献
 
-现阶段最有价值的贡献是用真实 Agent 跑一跑并反馈结果，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+虎符 1.0 是第一个正式版，你的反馈会让下一个版本更好。任何问题都欢迎
+[提 issue](https://github.com/kverona-ai/hufu/issues)：bug、某个 Agent 的表现和虎符预期的不一样、缺了
+某个模型或思考强度档位、使用上的疑问，或者新的想法。最有帮助的反馈会写明用的是哪个 Agent、什么版本
+（`hufu agents --probe`），运行了什么（`--dry-run` 会给出完整命令行），以及发生了什么
+（`hufu logs <job> --raw`、`hufu --json result <job>`），并去掉其中的隐私信息。
+
+也欢迎提交 pull request，[CONTRIBUTING.md](CONTRIBUTING.md) 说明了文件该放在哪里、需要通过哪些检查。
 
 ## 许可证
 

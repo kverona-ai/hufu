@@ -6,7 +6,7 @@
 # also be set with `hufu profile add`, `hufu pool add` and `hufu config set`, or through the MCP tools.
 #
 # Model ids are examples taken from vendor documentation in November 2026.
-# Use the ids your own account offers (for instance from `agy models`).
+# Use the ids your own account offers: `hufu models <profile>` asks the agent for them.
 
 version: 1
 
@@ -43,7 +43,7 @@ profiles:
   codex-high:
     description: Strong general executor for multi-file changes
     adapter: codex-cli
-    model: gpt-6.1-sol
+    model: gpt-6.2-sol
     effort: high
 
   codex-work:
@@ -56,8 +56,7 @@ profiles:
   agy-fast:
     description: Fast, cheap executor for reading and summarising large trees
     adapter: agy-cli
-    model: gemini-3.8-flash-medium
-    effort: low
+    model: gemini-3.8-flash-low   # an agy slug that names its level already; leave effort unset
 
   # --- Agent Client Protocol profiles ----------------------------------------
 

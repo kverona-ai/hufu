@@ -1,0 +1,53 @@
+name: Bug report
+description: Hufu did something wrong, or an agent behaves differently from what Hufu expects.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Chinese or English are both fine. 中文或英文都可以。
+        Please remove anything private (paths, keys, prompts you cannot share) from what you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Hufu version
+      description: The output of `hufu --version`.
+      placeholder: hufu 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: agents
+    attributes:
+      label: Agents involved
+      description: The output of `hufu agents --probe`, or the agent and its version.
+      render: text
+  - type: textarea
+    id: command
+    attributes:
+      label: The command
+      description: What you ran. `--dry-run` shows the exact command line Hufu gives the agent.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output and logs
+      description: For a job, `hufu --json result <job>` and `hufu logs <job> --raw`.
+      render: text

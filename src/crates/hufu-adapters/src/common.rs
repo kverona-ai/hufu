@@ -39,7 +39,12 @@ pub fn resolve(profile: &Profile, default: &[&str], path_var: Option<&str>) -> R
 }
 
 fn path_of(req: &RunRequest) -> Option<&str> {
-    req.env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v.as_str())
+    env_path(&req.env)
+}
+
+/// The `PATH` in an agent environment, whatever its case (Windows spells it `Path`).
+pub fn env_path(env: &std::collections::BTreeMap<String, String>) -> Option<&str> {
+    env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v.as_str())
 }
 
 /// Builds the process for a launch plan: resolved program, clean environment, workspace as cwd.
@@ -121,6 +126,129 @@ pub fn probe_cli(profile: &Profile, default: &[&str], install_hint: &str) -> (Pr
     }
 }
 
+/// Another agent CLI that `--version` names, for programs whose name several CLIs install. The
+/// Grok CLI installs `agent` into `~/.local/bin`, the same name Cursor uses, and the last one
+/// installed wins (reported to Cursor in July 2026).
+pub fn foreign_agent(version: &str) -> Option<&'static str> {
+    let v = version.trim_start().to_ascii_lowercase();
+    if v.starts_with("grok") { Some("Grok") } else { None }
+}
+
+/// Runs one of the agent's own listing commands (never a prompt) with the environment a job of
+/// this profile would get, and returns its standard output and the command line it ran.
+pub fn run_listing(
+    profile: &Profile,
+    default: &[&str],
+    env: &std::collections::BTreeMap<String, String>,
+    cwd: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(String, String), AdapterError> {
+    let program = resolve(profile, default, env_path(env)).map_err(AdapterError)?;
+    let shown = std::iter::once(command_of(profile, default)[0].clone())
+        .chain(program.prefix.iter().cloned())
+        .chain(args.iter().map(|a| a.to_string()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut cmd = proc::command_for(&program.path);
+    cmd.args(&program.prefix).args(args);
+    cmd.env_clear();
+    cmd.envs(env);
+    cmd.current_dir(cwd);
+    let out = proc::run_capture(cmd, timeout).map_err(|e| AdapterError(format!("`{shown}` could not run: {e}")))?;
+    if out.code != Some(0) {
+        let said = if out.stderr.trim().is_empty() { &out.stdout } else { &out.stderr };
+        let detail = proc::tail(said.trim(), 600);
+        let hint = if looks_like_auth_error(&detail) { " (log in to the agent first)" } else { "" };
+        return Err(AdapterError(match out.code {
+            Some(code) => format!("`{shown}` exited with code {code}{hint}: {detail}"),
+            None => format!("`{shown}` did not finish within {}s{hint}", timeout.as_secs()),
+        }));
+    }
+    Ok((out.stdout, shown))
+}
+
+/// Model ids from a listing printed as text, one model per line: `id<TAB>name`, `id - name`,
+/// `id  (current)` or a bare id, with optional bullets. Headers, blank lines and box drawing are
+/// skipped. A line that says `current` or `default` marks the default model.
+pub fn parse_model_lines(text: &str) -> Vec<hufu_contract::ModelInfo> {
+    let mut out: Vec<hufu_contract::ModelInfo> = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim().trim_start_matches(['-', '*', '•', '›', '>', '│', '|']).trim();
+        if line.is_empty() || line.ends_with(':') || line.ends_with("...") || line.chars().all(|c| !c.is_alphanumeric())
+        {
+            continue;
+        }
+        let (id, rest) = match line.split_once('\t') {
+            Some((id, rest)) => (id.trim(), rest.trim()),
+            None => match line.split_once(char::is_whitespace) {
+                Some((id, rest)) => (id, rest.trim()),
+                None => (line, ""),
+            },
+        };
+        let looks_like_id = id.chars().any(|c| c.is_ascii_alphabetic())
+            && id.chars().all(|c| c.is_ascii_alphanumeric() || "._:/@-[]=".contains(c))
+            && id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+        if !looks_like_id || id.ends_with(':') || out.iter().any(|m| m.id == id) {
+            continue;
+        }
+        let lower = rest.to_ascii_lowercase();
+        let default = lower.contains("(current)") || lower.contains("(default)") || lower.contains("[current]");
+        let name = rest
+            .trim_start_matches(['-', '–', '—', ':'])
+            .replace("(current)", "")
+            .replace("(default)", "")
+            .replace("[current]", "")
+            .trim()
+            .to_string();
+        out.push(hufu_contract::ModelInfo {
+            id: id.to_string(),
+            name: (!name.is_empty()).then_some(name),
+            default,
+            ..hufu_contract::ModelInfo::default()
+        });
+    }
+    out
+}
+
+/// The string value of a top-level `key = "value"` line in a TOML file, before the first table.
+/// Enough for the one or two keys Hufu reads from an agent's configuration; not a TOML parser.
+pub fn toml_top_string(text: &str, key: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            return None;
+        }
+        if let Some(value) = toml_assignment(line, key) {
+            return toml_unquote(value);
+        }
+    }
+    None
+}
+
+/// The value text of `key = value` on one line, if the line assigns `key`.
+pub fn toml_assignment<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let (k, v) = line.split_once('=')?;
+    (k.trim() == key).then_some(v.trim())
+}
+
+/// A quoted TOML string's content, with any trailing comment removed.
+pub fn toml_unquote(value: &str) -> Option<String> {
+    let value = value.trim();
+    let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let rest = &value[1..];
+    rest.find(quote).map(|end| rest[..end].to_string())
+}
+
+/// The quoted strings of a one-line TOML array such as `["low", "high"]`.
+pub fn toml_string_array(value: &str) -> Vec<String> {
+    let value = value.trim();
+    let Some(inner) = value.strip_prefix('[').and_then(|v| v.split(']').next()) else {
+        return Vec::new();
+    };
+    inner.split(',').filter_map(toml_unquote).collect()
+}
+
 /// Whether an environment variable is set to a non-empty value in Hufu's own environment.
 pub fn env_set(name: &str) -> bool {
     std::env::var(name).map(|v| !v.trim().is_empty()).unwrap_or(false)
@@ -129,6 +257,37 @@ pub fn env_set(name: &str) -> bool {
 /// Whether `dir` is inside a git work tree.
 pub fn in_git_repo(dir: &Path) -> bool {
     dir.ancestors().any(|d| d.join(".git").exists())
+}
+
+#[cfg(test)]
+mod listing_tests {
+    #[test]
+    fn model_lines_in_the_shapes_agents_print() {
+        let agy = "gemini-4-neon-high\tGemini 4 Neon (High)\ngemini-pro-orchestrator\tOrchestrator (Carbon)\n";
+        let m = super::parse_model_lines(agy);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[1].name.as_deref(), Some("Orchestrator (Carbon)"));
+        let cursor = "Available models:\n\n  - auto (current)\n  - composer-2 - Composer 2\n  * gpt-6.2-sol\n----\nTip: use --model\n";
+        let m = super::parse_model_lines(cursor);
+        let ids: Vec<&str> = m.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["auto", "composer-2", "gpt-6.2-sol"]);
+        assert!(m[0].default && m[0].name.is_none());
+        assert_eq!(m[1].name.as_deref(), Some("Composer 2"));
+    }
+
+    #[test]
+    fn toml_values() {
+        let text = "# c\nmodel = \"gpt-6.2-sol\" # pinned\n[profiles.x]\nmodel = \"other\"\n";
+        assert_eq!(super::toml_top_string(text, "model").as_deref(), Some("gpt-6.2-sol"));
+        assert_eq!(super::toml_top_string("[a]\nmodel = \"x\"", "model"), None);
+        assert_eq!(super::toml_string_array(r#"["low", 'high']"#), ["low", "high"]);
+    }
+
+    #[test]
+    fn grok_is_told_apart() {
+        assert_eq!(super::foreign_agent("grok 1.0.89 (28be5bb1bf65)"), Some("Grok"));
+        assert_eq!(super::foreign_agent("2026.11.17-eacade1"), None);
+    }
 }
 
 /// Text that means "log in first", across the agents Hufu drives.

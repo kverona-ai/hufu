@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented. Releases are published as pre-releases (`0.1.0-alpha.N`, the first is `v0.1.0-alpha.1`) with prebuilt binaries; the install scripts and `hufu update` download them and build from source only when no binary fits |
-| **Last updated** | 2026-11-13 (`hufu update`, release workflow with a manifest and checks) |
+| **Status** | Describes Hufu 1.0 as implemented. Releases are published with prebuilt binaries; 1.0.0 is the first stable one, after the pre-release `v0.1.0-alpha.1`. The install scripts and `hufu update` download the latest release and build from source only when no binary fits |
+| **Last updated** | 2026-11-20 (1.0.0; release text from `doc/releases/`) |
 | **Related** | [Agent install guide](../guide/agent-install.md), [User guide](../guide/user-guide.md), [Architecture](../architecture/architecture.md), [Cloud environment](cloud-environment.md), [Roadmap](../roadmap.md) |
 
 Hufu is deployed on a developer's own machine, next to the agents it drives. There is no server to
@@ -294,14 +294,15 @@ uploaded to a draft that becomes visible only when all of them are there. The in
 
 1. Set `version` in `src/Cargo.toml` (the workspace version and the six crate entries below it),
    run `cargo build` so that `Cargo.lock` follows, and merge.
-2. In the Actions tab, run the **Release** workflow on `main`. Tick "dry run" first to see every
+2. Optionally write the release text in `doc/releases/v<version>.md`. The workflow puts it before
+   GitHub's generated list of changes.
+3. In the Actions tab, run the **Release** workflow on `main`. Tick "dry run" first to see every
    check pass without publishing. Pushing the tag `v<version>` starts the same release.
 
-**Pre-releases.** A version such as `0.1.0-alpha.1` is released the same way. Until the first
-stable release exists, a pre-release becomes the latest release, because there is nothing else for
-the install scripts and `hufu update` to serve. Once a stable release exists, pre-release versions
-are published as GitHub pre-releases: `latest` stays on the stable one, and a pre-release is
-installed by name with `hufu update --version <tag>`.
+**Pre-releases.** A version such as `1.1.0-rc.1` is released the same way. Since 1.0.0 a stable
+release exists, so pre-release versions are published as GitHub pre-releases: `latest` stays on the
+stable one, and a pre-release is installed by name with `hufu update --version <tag>`. (Before 1.0,
+the pre-release `0.1.0-alpha.1` was the latest release because there was nothing else to serve.)
 
 Not automated, and open:
 

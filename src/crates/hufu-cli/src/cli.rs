@@ -40,6 +40,8 @@ pub enum Command {
     Resume(ResumeArgs),
     /// List profiles and pools with their capabilities and roles.
     Agents(AgentsArgs),
+    /// Ask the agent behind a profile which models and effort levels it offers.
+    Models(ModelsArgs),
     /// Check installation, logins and configuration.
     Doctor(DoctorArgs),
     /// Remove old finished jobs and missions.
@@ -87,7 +89,7 @@ pub struct RunArgs {
     /// read-only, workspace-write or full-access.
     #[arg(short, long)]
     pub permission: Option<String>,
-    /// default, off, low, medium, high, max, or native:<value>.
+    /// default, off, low, medium, high, xhigh, max, or native:<value>.
     #[arg(short, long)]
     pub effort: Option<String>,
     #[arg(short, long)]
@@ -238,6 +240,12 @@ pub struct AgentsArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct ModelsArgs {
+    /// The profile to ask, as `hufu agents` lists it.
+    pub profile: String,
+}
+
+#[derive(Args, Debug)]
 pub struct DoctorArgs {
     /// Also run real jobs against built-in fake agents.
     #[arg(long = "self-test")]
@@ -377,7 +385,7 @@ pub struct UpdateArgs {
     /// Only report whether a newer release exists. Nothing is downloaded or changed.
     #[arg(long, conflicts_with_all = ["from_source", "force"])]
     pub check: bool,
-    /// Install this release, for example v0.1.0, instead of the newest one. An older one works too.
+    /// Install this release, for example v1.0.0, instead of the newest one. An older one works too.
     #[arg(long = "version", value_name = "VERSION")]
     pub version: Option<String>,
     /// Build with cargo instead of downloading a binary: the main branch, or the tag given with --version.
@@ -424,7 +432,7 @@ pub struct ProfileArgs {
     /// pi only: the model provider.
     #[arg(long)]
     pub provider: Option<String>,
-    /// The default effort of this profile: default, off, low, medium, high, max or native:<value>.
+    /// The default effort of this profile: default, off, low, medium, high, xhigh, max or native:<value>.
     #[arg(long)]
     pub effort: Option<String>,
     /// What to do with an effort level this agent does not have: error (the default) or nearest.

@@ -559,7 +559,7 @@ fn plan_prompt(
          - At most {max_tasks} tasks. Fewer, larger tasks are better than many small ones.\n\
          - Every `agent` must be a name from the roster.\n\
          - `permission` is one of read-only, workspace-write, full-access, never above `{max_tier}`. Ask for the lowest tier that works, or null for the agent's default.\n\
-         - `effort` is one of low, medium, high, max, or null. Use a level the chosen agent supports.\n\
+         - `effort` is one of low, medium, high, xhigh, max, or null. Use a level the chosen agent supports.\n\
          - `depends_on` lists task ids that must be accepted first. No cycles.\n\
          - Each `prompt` must stand alone: the executor sees nothing but that prompt and the workspace.\n\
          - {commands}\n\n\

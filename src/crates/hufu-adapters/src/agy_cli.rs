@@ -1,11 +1,18 @@
 //! Antigravity CLI (`agy -p --output-format stream-json`).
 //!
-//! `agy` has no working-directory flag and no ACP entry point. Actions that need approval are
-//! soft-denied in headless mode: the run carries on and exits 0, so denial detection is mandatory.
+//! `agy` has no working-directory flag. Actions that need approval are soft-denied in headless
+//! mode: the run carries on and exits 0, so denial detection is mandatory. Every tier names its
+//! execution mode, because the mode a run gets without `--mode` depends on the user's settings and
+//! on the CLI version (`agentMode` defaults to `auto` where that is available since v1.5.7).
+//! `agy acp` is driven by the generic ACP adapter instead.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::time::Duration;
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
-    RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ModelList, ProbeResult,
+    Profile, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
 };
 use serde_json::Value;
 
@@ -13,7 +20,8 @@ use crate::common::{self, Collected};
 
 const DEFAULT: &[&str] = &["agy"];
 const INSTALL: &str = "install Antigravity CLI: `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then run `agy` once interactively to sign in";
-const FORBIDDEN: &[&str] = &["--dangerously-skip-permissions", "--sandbox", "--mode", "--add-dir"];
+// `--settings` takes per-run settings, including `permissions.allow` and `agentMode`.
+const FORBIDDEN: &[&str] = &["--dangerously-skip-permissions", "--sandbox", "--mode", "--add-dir", "--settings"];
 
 pub struct AgyCli;
 
@@ -48,7 +56,7 @@ impl Adapter for AgyCli {
     fn capabilities(&self, _profile: &Profile) -> Capabilities {
         Capabilities {
             permission_tiers: Tier::ALL.to_vec(),
-            efforts: vec![Effort::Low, Effort::Medium, Effort::High],
+            efforts: Effort::LOW_TO_MAX.to_vec(),
             native_effort: true,
             checked_at_runtime: false,
             models: Vec::new(),
@@ -60,8 +68,9 @@ impl Adapter for AgyCli {
             provides: Vec::new(),
             notes: vec![
                 "read-only uses `--mode plan --sandbox`; Hufu also checks afterwards that the workspace did not change".into(),
-                "workspace-write is agy's default headless boundary: workspace edits are applied, commands need an allow rule in agy's settings or are soft-denied".into(),
-                "model ids come from `agy models`; an unknown id fails the run".into(),
+                "workspace-write uses `--mode accept-edits --sandbox`: workspace edits are applied, commands need an allow rule in agy's settings (`permissions.allow`) or are soft-denied".into(),
+                "model slugs come from `agy models` (Gemini 4 Neon is the default); an unknown slug fails the run".into(),
+                "effort selects a variant of the model: xhigh and max exist only for models that publish them (Gemini 4 Neon and Hydrogen have xhigh), and Orchestrator models take no effort; do not combine `--effort` with a slug that already names a level (`gemini-4-neon-high`)".into(),
             ],
         }
     }
@@ -73,7 +82,7 @@ impl Adapter for AgyCli {
         a.extend(["-p".into(), req.prompt.clone(), "--output-format".into(), "stream-json".into()]);
         match req.permission {
             Tier::ReadOnly => a.extend(["--mode".into(), "plan".into(), "--sandbox".into()]),
-            Tier::WorkspaceWrite => a.push("--sandbox".into()),
+            Tier::WorkspaceWrite => a.extend(["--mode".into(), "accept-edits".into(), "--sandbox".into()]),
             Tier::FullAccess => a.push("--dangerously-skip-permissions".into()),
         }
         if let Some(model) = &req.model {
@@ -81,12 +90,15 @@ impl Adapter for AgyCli {
         }
         match &req.effort {
             Effort::Default => {}
-            Effort::Low | Effort::Medium | Effort::High => a.extend(["--effort".into(), req.effort.to_string()]),
+            Effort::Low | Effort::Medium | Effort::High | Effort::XHigh | Effort::Max => {
+                a.extend(["--effort".into(), req.effort.to_string()])
+            }
             Effort::Native(v) => a.extend(["--effort".into(), v.clone()]),
-            other => {
-                return Err(AdapterError(format!(
-                    "Antigravity has no `{other}` effort level; accepted: default, low, medium, high, native:<value>"
-                )));
+            Effort::Off => {
+                return Err(AdapterError(
+                    "Antigravity has no `off` effort level; accepted: default, low, medium, high, xhigh, max, native:<value>"
+                        .into(),
+                ));
             }
         }
         if req.output_schema.is_some() {
@@ -100,6 +112,25 @@ impl Adapter for AgyCli {
             return Err(AdapterError("Antigravity takes MCP servers from its own configuration files only; Hufu cannot attach one for a single run".into()));
         }
         Ok(plan)
+    }
+
+    /// `agy models` prints one `slug<TAB>name` line per model the account can use.
+    fn models(&self, profile: &Profile, env: &BTreeMap<String, String>, cwd: &Path) -> Result<ModelList, AdapterError> {
+        let (out, from) = common::run_listing(profile, DEFAULT, env, cwd, &["models"], Duration::from_secs(60))?;
+        let models = common::parse_model_lines(&out);
+        if models.is_empty() {
+            return Err(AdapterError(format!("{from} listed no models")));
+        }
+        Ok(ModelList {
+            source: "agent".into(),
+            from,
+            models,
+            notes: vec![
+                "a slug that ends in a level (`-low`, `-high`, `-xhigh`) already picks the effort: leave Hufu's effort at default for it".into(),
+                "Orchestrator models hand work to subagents and take no effort".into(),
+            ],
+            ..ModelList::default()
+        })
     }
 
     fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome {
@@ -252,11 +283,16 @@ mod tests {
         assert!(ro.args.windows(2).any(|w| w == ["--mode", "plan"]) && ro.args.contains(&"--sandbox".to_string()));
         let ww = AgyCli.plan(&p, &request(Tier::WorkspaceWrite)).unwrap();
         assert!(!ww.args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(
+            ww.args.windows(2).any(|w| w == ["--mode", "accept-edits"]) && ww.args.contains(&"--sandbox".to_string())
+        );
         let full = AgyCli.plan(&p, &request(Tier::FullAccess)).unwrap();
         assert!(full.args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(ro.stdin.is_none(), "stdin must stay closed for agy");
         let mut req = request(Tier::ReadOnly);
-        req.effort = Effort::Max;
+        req.effort = Effort::XHigh;
+        assert!(AgyCli.plan(&p, &req).unwrap().args.windows(2).any(|w| w == ["--effort", "xhigh"]));
+        req.effort = Effort::Off;
         assert!(AgyCli.plan(&p, &req).unwrap_err().0.contains("accepted"));
     }
 

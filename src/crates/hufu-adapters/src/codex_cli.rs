@@ -1,11 +1,15 @@
 //! Codex CLI (`codex exec --json`).
 //!
-//! Flags and event shapes follow the Codex documentation and `codex-rs/exec` sources as read on
-//! 2026-11-12. See `doc/research/agent-landscape.md`.
+//! Flags and event shapes follow the Codex documentation and `codex-rs/exec` sources, last checked
+//! on 2026-11-20 against Codex CLI 0.171. See `doc/research/agent-landscape.md`.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::time::Duration;
 
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
-    RawStream, RunOutcome, RunRequest, StructuredOutput, Tier,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ModelInfo, ModelList,
+    ProbeResult, Profile, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier,
 };
 use serde_json::Value;
 
@@ -34,11 +38,13 @@ fn effort_value(effort: &Effort) -> Result<Option<String>, AdapterError> {
         Effort::Low => Some("low".into()),
         Effort::Medium => Some("medium".into()),
         Effort::High => Some("high".into()),
+        Effort::XHigh => Some("xhigh".into()),
         Effort::Max => Some("max".into()),
         Effort::Native(v) => Some(v.clone()),
         Effort::Off => {
             return Err(AdapterError(
-                "Codex has no `off` effort level; accepted: default, low, medium, high, max, native:<value>".into(),
+                "Codex has no `off` effort level; accepted: default, low, medium, high, xhigh, max, native:<value>"
+                    .into(),
             ));
         }
     })
@@ -83,7 +89,7 @@ impl Adapter for CodexCli {
     fn capabilities(&self, _profile: &Profile) -> Capabilities {
         Capabilities {
             permission_tiers: Tier::ALL.to_vec(),
-            efforts: vec![Effort::Low, Effort::Medium, Effort::High, Effort::Max],
+            efforts: Effort::LOW_TO_MAX.to_vec(),
             native_effort: true,
             checked_at_runtime: false,
             models: Vec::new(),
@@ -94,8 +100,9 @@ impl Adapter for CodexCli {
             accepts_mcp_servers: true,
             provides: Vec::new(),
             notes: vec![
-                "effort levels beyond `high` depend on the model; `xhigh` and `ultra` are reachable as native:<value>"
-                    .into(),
+                "which effort levels a model accepts depends on the model (GPT-6 Luna stops at max); Codex's `ultra` hands the work to subagents and is reachable as native:ultra".into(),
+                "models are chosen by id, for example gpt-6.2-sol (Codex's default) or gpt-6.2-astra; the `/model` picker lists them".into(),
+                "since Codex 0.169, `codex exec` ignores project configuration and project MCP servers in a directory Codex does not trust; trust it once with `codex exec --trust` or add `--trust` to the profile's args".into(),
             ],
         }
     }
@@ -144,6 +151,32 @@ impl Adapter for CodexCli {
         Ok(plan)
     }
 
+    /// `codex debug models` prints the model catalog Codex refreshed for this login, as JSON.
+    fn models(&self, profile: &Profile, env: &BTreeMap<String, String>, cwd: &Path) -> Result<ModelList, AdapterError> {
+        let (out, from) =
+            common::run_listing(profile, DEFAULT, env, cwd, &["debug", "models"], Duration::from_secs(90))?;
+        let mut list = parse_models(&out, from)?;
+        let home = env
+            .get("CODEX_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| common::agent_home(profile, "CODEX_HOME", ".codex"));
+        let configured = home
+            .and_then(|h| std::fs::read_to_string(h.join("config.toml")).ok())
+            .and_then(|text| common::toml_top_string(&text, "model"));
+        match configured {
+            Some(model) => {
+                for m in &mut list.models {
+                    m.default = m.id == model;
+                }
+                list.notes.push(format!("config.toml sets `model = \"{model}\"`, which jobs without a model use"));
+            }
+            None => list.notes.push(
+                "listed in Codex's own order; without `model` in config.toml Codex picks its built-in default".into(),
+            ),
+        }
+        Ok(list)
+    }
+
     fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome {
         let plan = match self.plan(profile, req) {
             Ok(p) => p,
@@ -177,6 +210,46 @@ impl Adapter for CodexCli {
 }
 
 /// Translates one line of `codex exec --json` output.
+/// The catalog `codex debug models` prints: `{"models": [{"slug", "display_name", "description",
+/// "default_reasoning_level", "supported_reasoning_levels": [{"effort"}], "visibility", "priority"}]}`.
+/// Models with `visibility: hide` are left out, as Codex's own picker leaves them out.
+pub(crate) fn parse_models(text: &str, from: String) -> Result<ModelList, AdapterError> {
+    let doc: Value = serde_json::from_str(text.trim())
+        .or_else(|_| hufu_contract::json::extract_json(text).ok_or(()))
+        .map_err(|_| AdapterError(format!("{from} did not print the JSON model catalog")))?;
+    let mut entries: Vec<&Value> = doc
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AdapterError(format!("{from} printed no `models` list")))?
+        .iter()
+        .filter(|m| m.get("visibility").and_then(Value::as_str) != Some("hide"))
+        .collect();
+    entries.sort_by_key(|m| m.get("priority").and_then(Value::as_i64).unwrap_or(i64::MAX));
+    let text_of = |m: &Value, key: &str| m.get(key).and_then(Value::as_str).map(str::to_string);
+    let models = entries
+        .into_iter()
+        .filter_map(|m| {
+            let id = text_of(m, "slug")?;
+            let efforts = m
+                .get("supported_reasoning_levels")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|l| l.get("effort").or(Some(l)).and_then(Value::as_str).map(str::to_string))
+                .collect();
+            Some(ModelInfo {
+                name: text_of(m, "display_name").filter(|n| *n != id),
+                efforts,
+                default_effort: text_of(m, "default_reasoning_level"),
+                default: false,
+                description: text_of(m, "description"),
+                id,
+            })
+        })
+        .collect();
+    Ok(ModelList { source: "agent".into(), from, models, ..ModelList::default() })
+}
+
 pub(crate) fn parse_line(c: &mut Collected, sink: &dyn EventSink, line: &str) {
     let Ok(v) = serde_json::from_str::<Value>(line) else {
         return;
@@ -314,14 +387,16 @@ mod tests {
         let p = profile("codex-cli");
         let mut req = request(Tier::ReadOnly);
         req.effort = Effort::High;
-        req.model = Some("gpt-6.1-sol".into());
+        req.model = Some("gpt-6.2-sol".into());
         req.resume_session = Some("0199-abc".into());
         let plan = CodexCli.plan(&p, &req).unwrap();
         assert!(plan.args.contains(&"model_reasoning_effort=\"high\"".to_string()));
-        assert!(plan.args.windows(2).any(|w| w == ["-m", "gpt-6.1-sol"]));
+        assert!(plan.args.windows(2).any(|w| w == ["-m", "gpt-6.2-sol"]));
         let resume = plan.args.iter().position(|a| a == "resume").unwrap();
         let sandbox = plan.args.iter().position(|a| a == "--sandbox").unwrap();
         assert!(sandbox < resume, "non-global flags must precede `resume`");
+        req.effort = Effort::XHigh;
+        assert!(CodexCli.plan(&p, &req).unwrap().args.contains(&"model_reasoning_effort=\"xhigh\"".to_string()));
         req.effort = Effort::Off;
         assert!(CodexCli.plan(&p, &req).is_err());
     }
@@ -349,6 +424,24 @@ mod tests {
         let out = c.outcome(&sink, ended(0), &request(Tier::WorkspaceWrite), true, "");
         assert_eq!(out.final_message.as_deref(), Some("All done."));
         assert!(sink.types().contains(&"permission.denied".to_string()));
+    }
+
+    #[test]
+    fn reads_the_model_catalog() {
+        let catalog = r#"{"models": [
+            {"slug": "gpt-6.2-astra", "display_name": "GPT-6.2-Astra", "description": "Deep work.", "default_reasoning_level": "medium",
+             "supported_reasoning_levels": [{"effort": "low", "description": "x"}, {"effort": "xhigh", "description": "y"}], "visibility": "list", "priority": 2},
+            {"slug": "gpt-6.2-sol", "display_name": "GPT-6.2-Sol", "default_reasoning_level": "low",
+             "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}], "visibility": "list", "priority": 1},
+            {"slug": "codex-internal", "display_name": "x", "visibility": "hide", "priority": 0}
+        ]}"#;
+        let list = super::parse_models(catalog, "`codex debug models`".into()).unwrap();
+        let ids: Vec<&str> = list.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["gpt-6.2-sol", "gpt-6.2-astra"]);
+        assert_eq!(list.models[0].efforts, ["low", "ultra"]);
+        assert_eq!(list.models[1].default_effort.as_deref(), Some("medium"));
+        assert_eq!(list.models[1].name.as_deref(), Some("GPT-6.2-Astra"));
+        assert!(super::parse_models("not json", "x".into()).is_err());
     }
 
     #[test]

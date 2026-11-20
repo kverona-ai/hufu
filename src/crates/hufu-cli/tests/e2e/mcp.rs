@@ -108,6 +108,7 @@ fn the_handshake_and_the_tool_list_follow_the_protocol() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     for wanted in [
         "hufu_agents",
+        "hufu_models",
         "hufu_submit",
         "hufu_status",
         "hufu_wait",
@@ -199,6 +200,9 @@ fn an_agent_can_dispatch_a_job_and_read_its_result() {
     let names: Vec<&str> = agents["agents"].as_array().unwrap().iter().filter_map(|a| a["name"].as_str()).collect();
     assert!(names.contains(&"codex") && names.contains(&"acp"), "{names:?}");
     assert_eq!(agents["roles"]["advisor"], "claude");
+    let models = host.call("hufu_models", json!({"agent": "codex"}));
+    assert_eq!(models["models"][0]["id"], "fake-codex-small", "{models}");
+    assert_eq!(models["profile"], "codex");
 
     let dry = host.call("hufu_submit", json!({"agent": "codex", "prompt": "x", "dry_run": true}));
     assert_eq!(dry["dry_run"], true);
@@ -305,14 +309,14 @@ fn an_agent_can_configure_hufu() {
         host.call("hufu_submit", json!({"agent": "codex-home", "prompt": "x", "dry_run": true}))["effort"],
         "medium"
     );
-    assert!(host.call_err("hufu_submit", json!({"agent": "agy", "prompt": "x", "effort": "max"})).contains("nearest"));
+    assert!(host.call_err("hufu_submit", json!({"agent": "agy", "prompt": "x", "effort": "off"})).contains("nearest"));
     host.call(
         "hufu_profile_set",
         json!({"name": "agy", "profile": {"adapter": "agy-cli", "effort_fallback": "nearest"}}),
     );
-    let near = host.call("hufu_submit", json!({"agent": "agy", "prompt": "x", "effort": "max", "dry_run": true}));
-    assert_eq!(near["effort"], "high");
-    assert!(strings(&near["warnings"]).iter().any(|w| w.contains("nearest level `high`")), "{near}");
+    let near = host.call("hufu_submit", json!({"agent": "agy", "prompt": "x", "effort": "off", "dry_run": true}));
+    assert_eq!(near["effort"], "low");
+    assert!(strings(&near["warnings"]).iter().any(|w| w.contains("nearest level `low`")), "{near}");
     host.call("hufu_config_set", json!({"key": "defaults.effort", "value": null}));
 
     // Invalid changes are refused and leave the file as it was.

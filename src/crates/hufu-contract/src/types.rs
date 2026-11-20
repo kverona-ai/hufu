@@ -66,7 +66,9 @@ pub fn tier_list(tiers: &[Tier]) -> String {
 // ---------------------------------------------------------------------------------------------
 
 /// Hufu's uniform effort scale. `Default` passes nothing and lets the agent decide.
-/// `Native` carries an agent-specific value that is passed through verbatim.
+/// `XHigh` sits between `High` and `Max`: Codex, Claude Code, Antigravity, Kimi Code and pi all
+/// have a level of that name. `Native` carries an agent-specific value that is passed through
+/// verbatim.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Effort {
     #[default]
@@ -75,12 +77,16 @@ pub enum Effort {
     Low,
     Medium,
     High,
+    XHigh,
     Max,
     Native(String),
 }
 
 impl Effort {
-    pub const SCALE: [Effort; 5] = [Effort::Off, Effort::Low, Effort::Medium, Effort::High, Effort::Max];
+    pub const SCALE: [Effort; 6] = [Effort::Off, Effort::Low, Effort::Medium, Effort::High, Effort::XHigh, Effort::Max];
+
+    /// Every level from `low` to `max`, the range most agents have.
+    pub const LOW_TO_MAX: [Effort; 5] = [Effort::Low, Effort::Medium, Effort::High, Effort::XHigh, Effort::Max];
 
     pub fn parse(s: &str) -> Result<Effort, String> {
         let s = s.trim();
@@ -90,12 +96,13 @@ impl Effort {
             "low" => Effort::Low,
             "medium" => Effort::Medium,
             "high" => Effort::High,
+            "xhigh" | "extra-high" | "extra_high" => Effort::XHigh,
             "max" => Effort::Max,
             _ => match s.strip_prefix("native:") {
                 Some(v) if !v.is_empty() => Effort::Native(v.to_string()),
                 _ => {
                     return Err(format!(
-                        "unknown effort `{s}`; accepted: default, off, low, medium, high, max, or native:<value>"
+                        "unknown effort `{s}`; accepted: default, off, low, medium, high, xhigh, max, or native:<value>"
                     ));
                 }
             },
@@ -109,7 +116,8 @@ impl Effort {
             Effort::Low => Some(1),
             Effort::Medium => Some(2),
             Effort::High => Some(3),
-            Effort::Max => Some(4),
+            Effort::XHigh => Some(4),
+            Effort::Max => Some(5),
             Effort::Default | Effort::Native(_) => None,
         }
     }
@@ -133,6 +141,7 @@ impl fmt::Display for Effort {
             Effort::Low => f.write_str("low"),
             Effort::Medium => f.write_str("medium"),
             Effort::High => f.write_str("high"),
+            Effort::XHigh => f.write_str("xhigh"),
             Effort::Max => f.write_str("max"),
             Effort::Native(v) => write!(f, "native:{v}"),
         }
@@ -610,6 +619,55 @@ pub trait Adapter: Send + Sync {
 
     /// Runs one prompt to completion, emitting events as it goes.
     fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome;
+
+    /// The models this profile's agent offers, asked from the agent itself where it has a way to
+    /// say (a command, its configuration, or an ACP session), so that the list is as current as
+    /// the installed agent. `env` is the environment a job of this profile would get, and `cwd`
+    /// the directory it would run in. Never sends a prompt.
+    fn models(
+        &self,
+        profile: &Profile,
+        env: &BTreeMap<String, String>,
+        cwd: &std::path::Path,
+    ) -> Result<ModelList, AdapterError> {
+        let _ = (env, cwd);
+        Err(AdapterError(format!("adapter `{}` (profile `{}`) has no way to list models", self.kind(), profile.name)))
+    }
+}
+
+/// One model an agent offers.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelInfo {
+    /// What to pass as `model`.
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The agent's own effort values for this model, when the agent says.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+    /// The model the agent uses when none is named.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub default: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// The models a profile can run, and where the list came from.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelList {
+    /// `agent` (the agent's own command or session said so), `config` (read from the agent's
+    /// configuration file) or `documentation` (Hufu's copy of the vendor's documentation).
+    pub source: String,
+    /// The command that was run, the file that was read, or the page that was copied.
+    pub from: String,
+    pub models: Vec<ModelInfo>,
+    /// Effort values the agent offers for every model, when it states them once for all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// Looks up adapters by kind. The binary wires the real registry in; tests can supply their own.
@@ -632,7 +690,13 @@ mod tests {
 
     #[test]
     fn effort_parses_and_finds_nearest() {
-        assert_eq!(Effort::parse("native:xhigh").unwrap(), Effort::Native("xhigh".into()));
+        assert_eq!(Effort::parse("native:ultra").unwrap(), Effort::Native("ultra".into()));
+        assert_eq!(Effort::parse("xhigh").unwrap(), Effort::XHigh);
+        assert_eq!(Effort::XHigh.to_string(), "xhigh");
+        assert_eq!(Effort::XHigh.nearest(&[Effort::Low, Effort::Medium, Effort::High]), Some(Effort::High));
+        // Equally far from `high` and `max`: the lower level wins, which never raises cost.
+        assert_eq!(Effort::XHigh.nearest(&[Effort::High, Effort::Max]), Some(Effort::High));
+        assert_eq!(Effort::Max.nearest(&Effort::LOW_TO_MAX), Some(Effort::Max));
         assert!(Effort::parse("extreme").is_err());
         let supported = [Effort::Low, Effort::Medium, Effort::High];
         assert_eq!(Effort::Max.nearest(&supported), Some(Effort::High));

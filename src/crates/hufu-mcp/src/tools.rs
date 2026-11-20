@@ -36,8 +36,8 @@ fn submit_schema() -> Value {
             "title": {"type": "string"},
             "cwd": {"type": "string", "description": "The workspace. Default: the directory the MCP server runs in."},
             "permission": {"type": "string", "enum": TIERS, "description": "Default read-only. full-access must be asked for explicitly."},
-            "effort": {"type": "string", "description": "Reasoning effort for this job: default, off, low, medium, high, max, or native:<value>. Left out: the profile's effort, then defaults.effort. hufu_agents lists the levels each profile has; a level it lacks is an error."},
-            "model": {"type": "string", "description": "A model id for this job, passed to the agent as it is. Left out: the profile's model, then the agent's own default."},
+            "effort": {"type": "string", "description": "Reasoning effort for this job: default, off, low, medium, high, xhigh, max, or native:<value>. Left out: the profile's effort, then defaults.effort. hufu_agents lists the levels each profile has; a level it lacks is an error unless the profile sets effort_fallback: nearest."},
+            "model": {"type": "string", "description": "A model id for this job, passed to the agent as it is. Left out: the profile's model, then the agent's own default. hufu_models lists the ids a profile's agent offers."},
             "timeout": {"type": "string", "description": "For example 30m or 2h."},
             "inactivity_timeout": {"type": "string"},
             "isolation": {"type": "string", "enum": ["none", "worktree"], "description": "worktree gives the job its own copy of the repository on a branch hufu/<job>."},
@@ -61,6 +61,17 @@ const TOOLS: &[Tool] = &[
         title: "List agents",
         description: "Lists the configured profiles and pools with their capabilities (permission tiers, effort levels, resume, computer use), their accounts, and which ones are the default advisor, executors and computer-use agent. Set probe to also check installation and login.",
         schema: || obj(json!({"probe": {"type": "boolean"}}), &[]),
+    },
+    Tool {
+        name: "hufu_models",
+        title: "List an agent's models",
+        description: "Asks the agent behind one profile which models it offers, with each model's effort levels where the agent says, and the effort values Hufu accepts for the profile. Runs only the agent's own listing command or an ACP handshake, never a prompt; Claude Code has no listing command, so its list is Hufu's copy of the documentation.",
+        schema: || {
+            obj(
+                json!({"agent": {"type": "string", "description": "A profile name from hufu_agents."}, "cwd": {"type": "string"}}),
+                &["agent"],
+            )
+        },
     },
     Tool {
         name: "hufu_submit",
@@ -326,6 +337,11 @@ pub fn call(server: &Server, name: &str, args: &Value) -> Result<Value> {
             Ok(
                 json!({"agents": agents, "roles": loaded.config.roles, "computer_use": loaded.config.capabilities.computer_use}),
             )
+        }
+        "hufu_models" => {
+            let (loaded, dir) = server.load(text(args, "cwd"))?;
+            let view = ops::models(&loaded, adapters, need(args, "agent")?, &dir)?;
+            serde_json::to_value(view).map_err(|e| HufuError::internal(e.to_string()))
         }
         "hufu_submit" => {
             let (loaded, _) = server.load(text(args, "cwd"))?;

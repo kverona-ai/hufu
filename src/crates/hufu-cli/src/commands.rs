@@ -102,6 +102,7 @@ pub fn run(args: Cli) -> Result<i32> {
         Command::Cancel(a) => cmd_cancel(&app, a),
         Command::Resume(a) => cmd_resume(&app, a),
         Command::Agents(a) => cmd_agents(&app, a),
+        Command::Models(a) => cmd_models(&app, a),
         Command::Doctor(a) => cmd_doctor(&app, a),
         Command::Prune(a) => cmd_prune(&app, a),
         Command::Mission(c) => cmd_mission(&app, c),
@@ -570,6 +571,15 @@ fn cmd_agents(app: &App, a: AgentsArgs) -> Result<i32> {
             println!("`hufu agents --probe` also checks installation and login; `hufu profile add` adds an agent or another account.");
         }
     });
+    Ok(exit::OK)
+}
+
+fn cmd_models(app: &App, a: ModelsArgs) -> Result<i32> {
+    let loaded = app.load()?;
+    let cwd =
+        std::env::current_dir().map_err(|e| HufuError::internal(format!("cannot read the current directory: {e}")))?;
+    let view = ops::models(&loaded, &app.adapters, &a.profile, &cwd)?;
+    app.out(&view, || render::models(&view));
     Ok(exit::OK)
 }
 

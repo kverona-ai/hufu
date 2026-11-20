@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Describes Hufu 0.1 as implemented. The examples in it are checked by the test suite where they are files under `doc/examples/` |
-| **Last updated** | 2026-11-13 (model and effort, who gets a task) |
+| **Status** | Describes Hufu 1.0 as implemented. The examples in it are checked by the test suite where they are files under `doc/examples/` |
+| **Last updated** | 2026-11-20 (`xhigh`, `hufu models`, Cursor runs `cursor-agent`, `agy-acp`, Kimi follow-ups) |
 | **Related** | [Agent install guide](agent-install.md), [Deployment](../deployment/deployment.md), [Technical design](../technical/technical-design.md), [Adapter contract](../technical/adapter-contract.md) |
 
 Everything you can do with Hufu, from the first command to missions and computer use.
@@ -134,7 +134,8 @@ went in but `hufu doctor` then reports a problem, the document says `"updated": 
 
 - A **profile** is one agent configured one way: an adapter, perhaps a model, an effort level, an
   account. Presets exist for every supported agent (`codex`, `agy`, `cursor`, `claude`, `kimi`,
-  `pi`, `cursor-acp`, `kimi-acp`), so an installed agent works without writing anything.
+  `pi`, `cursor-acp`, `kimi-acp`, `agy-acp`), so an installed agent works without writing
+  anything.
 - A **pool** is a set of profiles that can stand in for each other, typically several accounts.
 - A **task** is what you ask for. Once submitted it is a **job**, which runs in the background and
   is recorded on disk.
@@ -168,7 +169,7 @@ The most used options of `hufu run`:
 |---|---|
 | `-a, --agent <name>` | A profile or a pool. Default: the first of `roles.executors` |
 | `-p, --permission <tier>` | `read-only` (default), `workspace-write`, `full-access` |
-| `-e, --effort <level>` | `default`, `off`, `low`, `medium`, `high`, `max`, or `native:<value>`. See [Model and effort](#model-and-effort) |
+| `-e, --effort <level>` | `default`, `off`, `low`, `medium`, `high`, `xhigh`, `max`, or `native:<value>`. See [Model and effort](#model-and-effort) |
 | `-m, --model <id>` | A model id, passed to the agent as it is. Default: the profile's model |
 | `-C, --cwd <dir>` | The workspace. Default: the current directory |
 | `-t, --timeout <d>`, `--inactivity-timeout <d>` | Limits such as `30m`, `2h`. Defaults: 30 minutes, and 10 minutes of silence |
@@ -202,12 +203,13 @@ A job is in one of these **states**: `queued`, `starting`, `running`, then one o
 ```console
 $ hufu agents            # profiles and pools, their tiers and effort levels, and the roles
 $ hufu agents --probe    # also: is it installed, is it logged in
+$ hufu models codex      # the models and effort levels the agent behind one profile offers
 ```
 
 ### Adding an agent
 
 ```console
-$ hufu profile add codex-high --adapter codex-cli --model gpt-6.1-sol --effort high
+$ hufu profile add codex-high --adapter codex-cli --model gpt-6.2-sol --effort high
 $ hufu profile add or-reasoner --adapter pi --provider openrouter --model vendor/model-slug \
     --env OPENROUTER_API_KEY
 $ hufu profile add my-agent --adapter acp --command my-agent,acp    # any ACP agent
@@ -343,25 +345,48 @@ one that says something wins:
 When none of them says anything, the agent uses its own default model and effort.
 
 ```console
-$ hufu run -a codex -m gpt-6.1-sol -e high "Review src/auth for race conditions"
-$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.1-sol --effort max \
+$ hufu run -a codex -m gpt-6.2-sol -e high "Review src/auth for race conditions"
+$ hufu profile add codex-deep --adapter codex-cli --model gpt-6.2-astra --effort xhigh \
     --description "Hard design and debugging work"
 $ hufu config set defaults.effort medium
 ```
 
-**Effort** is one scale for every agent: `off`, `low`, `medium`, `high`, `max`, plus `default`
-(pass nothing and let the agent decide) and `native:<value>` (pass the agent's own value through,
-for example `native:xhigh` for Codex).
+**Effort** is one scale for every agent: `off`, `low`, `medium`, `high`, `xhigh`, `max`, plus
+`default` (pass nothing and let the agent decide) and `native:<value>` (pass the agent's own value
+through, for example `native:ultra` for Codex, which hands the work to subagents, or
+`native:ultracode` for Claude Code).
 
-| Agent | Levels it has | What Hufu passes for `high` | Model |
+| Agent | Levels it has | What Hufu passes for `xhigh` | Model |
 |---|---|---|---|
-| Codex | `low` to `max` | `-c model_reasoning_effort="high"` | `-m <id>` |
-| Claude Code | `low` to `max` | `--effort high` | `--model <id>` |
-| Antigravity | `low` to `high` | `--effort high` | `--model <id>` |
-| Kimi Code | `low` to `max` | the variable `KIMI_MODEL_THINKING_EFFORT=high` | `-m <id>` |
-| pi | `off` to `max` | `--thinking high` | `--model <id>` |
+| Codex | `low` to `max` | `-c model_reasoning_effort="xhigh"` | `-m <id>`, for example `gpt-6.2-sol` |
+| Claude Code | `low` to `max` | `--effort xhigh` | `--model <alias or id>`, for example `opus` |
+| Antigravity | `low` to `max` | `--effort xhigh` | `--model <slug>`, as `agy models` lists it |
+| Kimi Code | `low` to `max`, only when the profile defines its model with `KIMI_MODEL_NAME` | the variable `KIMI_MODEL_THINKING_EFFORT=xhigh` | `-m <alias>`, for example `kimi-code/k3` |
+| pi | `off` to `max` | `--thinking xhigh` | `--model <id>` |
 | Cursor | none | nothing: pick reasoning strength through the model id | `--model <id>` |
 | ACP agents | what the agent offers when the session opens | a session option | a session option |
+
+The levels a **model** accepts can be fewer than its agent's. Codex refuses a level the model
+lacks; Claude Code, Antigravity and pi use the next level the model has. A Kimi Code profile that
+uses Kimi's logged-in models takes its level from `[thinking] effort` in Kimi's `config.toml`, or
+use the `kimi-acp` preset, which sets it per session.
+
+**Which models and levels exist?** Ask the agent through Hufu:
+
+```console
+$ hufu models codex
+codex (codex-cli): asked the agent, `codex debug models`
+MODEL            ABOUT          AGENT EFFORTS                           DEFAULT EFFORT
+gpt-6.2-sol      GPT-6.2-Sol    low, medium, high, xhigh, max, ultra    low
+gpt-6.2-astra    GPT-6.2-Astra  low, medium, high, xhigh, max, ultra    medium
+...
+hufu effort for this profile: default, low, medium, high, xhigh, max, or native:<agent value>
+```
+
+It runs only the agent's own listing command (`codex debug models`, `agy models`,
+`cursor-agent models`, `pi --list-models`), reads Kimi's `config.toml`, or opens an ACP session
+without a prompt. Claude Code has no listing command, so for it Hufu shows its copy of Claude Code's
+model page and says so. From another agent the same list is `hufu_models`.
 
 `hufu agents` lists the levels of each of your profiles. The rules:
 
@@ -372,8 +397,8 @@ for example `native:xhigh` for Codex).
   used, with a warning.
 - **For an ACP agent** the levels and models are only known once its session is open, so one it
   does not offer fails the job at its start, not at submission.
-- **A model id is passed on as it is.** Hufu keeps no list of models; the agent decides whether
-  the id exists.
+- **A model id is passed on as it is.** Hufu keeps no list of models of its own; the agent decides
+  whether the id exists, and `hufu models` shows what the agent offers.
 
 `--dry-run` prints the exact command line a combination leads to, see [section 3](#3-jobs). After
 a job, `hufu result` names the profile, model and effort that really ran.
@@ -440,7 +465,7 @@ A mission file holds the same settings; see [`doc/examples/mission.yaml`](../exa
    profile and say in its `description` what it is good at:
 
    ```console
-   $ hufu profile add codex-deep --adapter codex-cli --model gpt-6.1-sol --effort max \
+   $ hufu profile add codex-deep --adapter codex-cli --model gpt-6.2-astra --effort xhigh \
        --description "Hard design and debugging work"
    $ hufu mission start --advisor claude --executors codex-deep,codex-any,agy "..."
    ```
@@ -529,7 +554,7 @@ The connected agent gets these tools:
 
 | Group | Tools |
 |---|---|
-| Dispatch | `hufu_agents`, `hufu_submit`, `hufu_status`, `hufu_wait`, `hufu_result`, `hufu_logs`, `hufu_cancel`, `hufu_resume` |
+| Dispatch | `hufu_agents`, `hufu_models`, `hufu_submit`, `hufu_status`, `hufu_wait`, `hufu_result`, `hufu_logs`, `hufu_cancel`, `hufu_resume` |
 | Missions | `hufu_mission_start`, `hufu_mission_status`, `hufu_mission_pause`, `hufu_mission_resume`, `hufu_mission_abort` |
 | Configuration | `hufu_config_get`, `hufu_config_set`, `hufu_profile_set`, `hufu_profile_remove`, `hufu_pool_set`, `hufu_pool_remove`, `hufu_init`, `hufu_setup` |
 | Health | `hufu_doctor` |
@@ -542,15 +567,26 @@ is written; an invalid one is refused and nothing changes.
 
 You talk to the agent; the agent calls the tools. These are the calls behind some common requests.
 
+**Which models are there?** "Which models can Hufu's Codex profile use, and at what effort?"
+
+```jsonc
+// hufu_models
+{ "agent": "codex" }
+```
+
+The answer lists each model's id, its effort levels and default level as the agent reports them,
+where the list came from (`source`: `agent`, `config` or `documentation`), and the effort values
+Hufu accepts for that profile (`hufu_efforts`).
+
 **One task, with a model and an effort.** "Have Codex review src/auth for race conditions. Use
-gpt-6.1-sol at high effort."
+gpt-6.2-sol at high effort."
 
 ```jsonc
 // hufu_submit
 {
   "agent": "codex",
   "prompt": "Review src/auth for race conditions. Give the file and line of each finding.",
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "effort": "high"
 }
 ```
@@ -575,8 +611,8 @@ worktree, and at the same time have Antigravity update the API docs."
 
 The agent is the commander here: it chose who gets which task, from what `hufu_agents` told it.
 
-**A named combination.** "Add a Hufu profile codex-deep: Codex with gpt-6.1-sol at max effort, for
-hard design and debugging work."
+**A named combination.** "Add a Hufu profile codex-deep: Codex with gpt-6.2-astra at xhigh effort,
+for hard design and debugging work."
 
 ```jsonc
 // hufu_profile_set
@@ -584,8 +620,8 @@ hard design and debugging work."
   "name": "codex-deep",
   "profile": {
     "adapter": "codex-cli",
-    "model": "gpt-6.1-sol",
-    "effort": "max",
+    "model": "gpt-6.2-astra",
+    "effort": "xhigh",
     "description": "Hard design and debugging work"
   }
 }
@@ -782,6 +818,9 @@ private.
 | Exit 10, `auth_required` | Log the agent in, or export the variable named in the message |
 | `cannot enforce permission ...` | That agent has no such tier. Pick another tier or another profile; `hufu agents` lists them |
 | `effort ... has no mapping` | Use a level `hufu agents` lists for that profile, or `hufu profile set <name> --effort-fallback nearest` |
+| The agent rejects a model id, or a level for that model | `hufu models <profile>` lists the ids the agent offers and each model's levels |
+| `cursor` reports `is the Grok CLI, not Cursor's agent` | Another program named `agent` is first on `PATH`. Install Cursor's CLI, which also installs `cursor-agent`; Hufu prefers that name |
+| A Codex job ignores the project's `.codex/config.toml` or its MCP servers | Codex 0.169 and later keep them off in a directory Codex does not trust. Run `codex exec --trust` there once, or add `--trust` to the profile's `args` |
 | `tier_violated` | A read-only job changed files. The changes are listed in the result |
 | A job stays `queued` | It waits for a free slot (`hufu status <job>` says so; see `limits`), for a job it depends on, or for the display |
 | `lost` | The runner process died, for example at a reboot. `hufu resume` or run it again; with the daemon and `--retry` this is automatic |
@@ -793,8 +832,9 @@ private.
 
 ## 16. Known limits
 
-- **Not yet run against real accounts in CI.** The adapters follow each agent's documentation as
-  of November 2026 and are tested against fakes that speak the same formats.
+- **Not run against real accounts in CI.** The adapters follow each agent's documentation as of
+  20 November 2026 and are tested against fakes that speak the same formats. Report what differs
+  on your machine as an [issue](https://github.com/kverona-ai/hufu/issues).
 - **Kimi Code print mode and pi cannot be sandboxed** by their own means: Kimi supports only
   `full-access`, pi only `read-only` and `full-access`. Use `kimi-acp` to get all tiers for Kimi.
 - **Timeouts are per attempt.** A job with `--retry 3` can run three times its timeout.

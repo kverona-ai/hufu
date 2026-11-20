@@ -4,15 +4,15 @@
 //! advertises no file-system or terminal capabilities (so the agent uses its own tools), and
 //! answers every permission request from the tier policy in `doc/technical/adapter-contract.md`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use hufu_contract::proc::{self, Step, Streamed};
 use hufu_contract::{
     Adapter, AdapterError, CancelToken, Capabilities, Effort, EffortFallback, EventBody, EventSink, LaunchPlan,
-    PermissionRequests, ProbeResult, Profile, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
-    json::instruct_json, reason,
+    ModelInfo, ModelList, PermissionRequests, ProbeResult, Profile, RawStream, RunOutcome, RunRequest,
+    StructuredOutput, Tier, Usage, json::instruct_json, reason,
 };
 use serde_json::{Value, json};
 
@@ -144,6 +144,113 @@ impl Adapter for Acp {
         let result = client.session();
         client.finish(result)
     }
+
+    /// Opens a session without sending a prompt and reads the models and thought levels the
+    /// agent offers in it, then ends the agent.
+    fn models(&self, profile: &Profile, env: &BTreeMap<String, String>, cwd: &Path) -> Result<ModelList, AdapterError> {
+        let req = RunRequest {
+            job_id: "models".into(),
+            prompt: String::new(),
+            cwd: cwd.to_path_buf(),
+            // No prompt is sent, so nothing can act; full access only keeps `plan` from refusing.
+            permission: Tier::FullAccess,
+            effort: Effort::Default,
+            model: None,
+            output_schema: None,
+            resume_session: None,
+            env: env.clone(),
+            mcp_servers: Vec::new(),
+            scratch_dir: cwd.to_path_buf(),
+        };
+        let plan = self.plan(profile, &req)?;
+        let shown = common::command_of(profile, &[]).join(" ");
+        let cmd = common::command_from_plan(profile, &[], &req, &plan).map_err(AdapterError)?;
+        let sink = Quiet;
+        let cancel = CancelToken::new();
+        let proc = Streamed::spawn(cmd, None, true, &sink)
+            .map_err(|e| AdapterError(format!("`{shown}` could not start: {e}")))?;
+        let mut client = Client {
+            proc,
+            sink: &sink,
+            cancel: &cancel,
+            profile,
+            req: &req,
+            next_id: 1,
+            c: Collected::default(),
+            text: String::new(),
+            thought: String::new(),
+            tools: HashMap::new(),
+            rejected: Vec::new(),
+            replaying: false,
+            session_id: None,
+            cancel_sent_at: None,
+        };
+        let opened = client.open_session();
+        let stderr = client.close();
+        match opened {
+            Ok((_, opened)) => Ok(models_of(&opened, format!("`{shown}` (ACP session/new)"))),
+            Err(End::Fail(_, detail)) | Err(End::Stop(detail)) => Err(AdapterError(if stderr.is_empty() {
+                format!("`{shown}`: {detail}")
+            } else {
+                format!("`{shown}`: {detail}\n{stderr}")
+            })),
+        }
+    }
+}
+
+/// A sink for a session that only lists models: nothing it says is kept.
+struct Quiet;
+
+impl EventSink for Quiet {
+    fn emit(&self, _event: EventBody) {}
+    fn raw(&self, _stream: RawStream, _line: &str) {}
+    fn child_started(&self, _pid: u32) {}
+}
+
+/// The models and thought levels a `session/new` answer offers: the `model` and `thought_level`
+/// config options, or the older `models` field (`availableModels`, `currentModelId`).
+pub(crate) fn models_of(opened: &Value, from: String) -> ModelList {
+    let options = opened.get("configOptions").cloned().unwrap_or(Value::Null);
+    let mut list = ModelList { source: "agent".into(), from, ..ModelList::default() };
+    if let Some(option) = find_option(&options, "model") {
+        let current = option.get("currentValue").and_then(Value::as_str);
+        list.models = option_values(option)
+            .into_iter()
+            .map(|(value, name)| ModelInfo {
+                default: current == Some(value.as_str()),
+                name: (name != value).then_some(name),
+                id: value,
+                ..ModelInfo::default()
+            })
+            .collect();
+    } else if let Some(models) = opened.get("models") {
+        let current = models.get("currentModelId").and_then(Value::as_str);
+        for m in models.get("availableModels").and_then(Value::as_array).into_iter().flatten() {
+            let Some(id) = m.get("modelId").and_then(Value::as_str) else { continue };
+            list.models.push(ModelInfo {
+                id: id.to_string(),
+                name: m.get("name").and_then(Value::as_str).filter(|n| *n != id).map(str::to_string),
+                description: m.get("description").and_then(Value::as_str).map(str::to_string),
+                default: current == Some(id),
+                ..ModelInfo::default()
+            });
+        }
+    }
+    if let Some(option) = find_option(&options, "thought_level") {
+        list.efforts = option_values(option).into_iter().map(|(value, _)| value).collect();
+        if let Some(current) = option.get("currentValue").and_then(Value::as_str) {
+            list.notes.push(format!("the session starts at thought level `{current}`"));
+        }
+    }
+    if list.models.is_empty() {
+        list.notes.push(
+            "the agent offers no model choice in its sessions; it uses the model of its own configuration".into(),
+        );
+    }
+    if list.efforts.is_empty() {
+        list.notes.push("the agent offers no thought-level option, so effort cannot be set through ACP".into());
+    }
+    list
 }
 
 /// Why a JSON-RPC exchange did not produce a result.
@@ -416,8 +523,10 @@ impl Client<'_> {
 
     // --- the session -------------------------------------------------------------------------
 
-    fn session(&mut self) -> End {
-        let fail = |why: &'static str, detail: String| End::Fail(why, detail);
+    /// Initializes the connection and opens (or resumes) the session. Returns the session id and
+    /// the agent's answer, which carries its config options and modes.
+    fn open_session(&mut self) -> Result<(String, Value), End> {
+        let fail = |why: &'static str, detail: String| Err(End::Fail(why, detail));
         let init = self.call(
             "initialize",
             json!({
@@ -429,7 +538,7 @@ impl Client<'_> {
         );
         let init = match init {
             Ok(v) => v,
-            Err(e) => return self.rpc_failure("initialize", e),
+            Err(e) => return Err(self.rpc_failure("initialize", e)),
         };
         let version = init.get("protocolVersion").and_then(Value::as_u64).unwrap_or(1);
         if version != 1 {
@@ -453,7 +562,7 @@ impl Client<'_> {
         if let Some(method) = self.profile.auth_method.clone()
             && let Err(e) = self.call("authenticate", json!({"methodId": method}), Some(HANDSHAKE))
         {
-            return self.rpc_failure("authenticate", e);
+            return Err(self.rpc_failure("authenticate", e));
         }
 
         let servers: Vec<Value> = self
@@ -507,7 +616,7 @@ impl Client<'_> {
                     Some((method, _)) => {
                         match self.call("authenticate", json!({"methodId": method}), Some(HANDSHAKE)) {
                             Ok(_) => open(self),
-                            Err(e) => return self.rpc_failure("authenticate", e),
+                            Err(e) => return Err(self.rpc_failure("authenticate", e)),
                         }
                     }
                     None => Err(Rpc::Error { code: -32000, message: "authentication required".into() }),
@@ -517,14 +626,21 @@ impl Client<'_> {
         };
         let (session_id, opened) = match opened {
             Ok(v) => v,
-            Err(e) => return self.rpc_failure("session/new", e),
+            Err(e) => return Err(self.rpc_failure("session/new", e)),
         };
         if session_id.is_empty() {
             return fail(reason::PROTOCOL_ERROR, "the agent returned no session id".into());
         }
         self.session_id = Some(session_id.clone());
         self.c.session = Some(session_id.clone());
+        Ok((session_id, opened))
+    }
 
+    fn session(&mut self) -> End {
+        let (session_id, opened) = match self.open_session() {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
         let options = opened.get("configOptions").cloned().unwrap_or(Value::Null);
         if let Some(model) = self.req.model.clone()
             && let Err(e) = self.set_option(
@@ -591,10 +707,7 @@ impl Client<'_> {
         wanted: &[String],
         what: &str,
     ) -> Result<String, End> {
-        let option = options.as_array().into_iter().flatten().find(|o| {
-            o.get("category").and_then(Value::as_str) == Some(category)
-                || o.get("id").and_then(Value::as_str) == Some(category)
-        });
+        let option = find_option(options, category);
         let Some(option) = option else {
             return Err(End::Fail(
                 reason::UNSUPPORTED,
@@ -629,7 +742,10 @@ impl Client<'_> {
         let aliases = |e: &Effort| -> Vec<String> {
             match e {
                 Effort::Off => vec!["off".into(), "none".into(), "disabled".into()],
-                Effort::Max => vec!["max".into(), "maximum".into(), "xhigh".into()],
+                Effort::XHigh => {
+                    vec!["xhigh".into(), "extra-high".into(), "extra_high".into(), "extra high".into(), "x-high".into()]
+                }
+                Effort::Max => vec!["max".into(), "maximum".into()],
                 Effort::Native(v) => vec![v.clone()],
                 other => vec![other.to_string()],
             }
@@ -681,6 +797,19 @@ impl Client<'_> {
                 )));
             }
         }
+    }
+
+    /// Ends the agent after a session that only listed models, and returns the tail of its stderr.
+    fn close(mut self) -> String {
+        self.proc.close_stdin();
+        let until = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < until {
+            if let Step::Done = self.proc.next(self.sink, Duration::from_millis(50)) {
+                break;
+            }
+        }
+        let ended = self.proc.finish(self.cancel);
+        proc::tail(ended.stderr_tail.trim(), 600)
     }
 
     fn finish(mut self, end: End) -> RunOutcome {
@@ -741,6 +870,25 @@ impl Client<'_> {
             }
         }
     }
+}
+
+/// The config option for a reserved category. Agents that leave out `category` are matched by a
+/// few common ids instead (`thinking` and `effort` for the thought level).
+fn find_option<'v>(options: &'v Value, category: &str) -> Option<&'v Value> {
+    let aliases: &[&str] = match category {
+        "thought_level" => &["thinking", "effort", "reasoning_effort", "reasoning"],
+        _ => &[],
+    };
+    let all = options.as_array().map(Vec::as_slice).unwrap_or_default();
+    all.iter().find(|o| o.get("category").and_then(Value::as_str) == Some(category)).or_else(|| {
+        all.iter().find(|o| {
+            o.get("category").is_none_or(Value::is_null)
+                && o.get("id")
+                    .and_then(Value::as_str)
+                    .map(|id| id == category || aliases.contains(&id))
+                    .unwrap_or(false)
+        })
+    })
 }
 
 fn option_values(option: &Value) -> Vec<(String, String)> {
@@ -923,8 +1071,39 @@ mod tests {
     }
 
     #[test]
+    fn options_are_found_by_category_then_by_common_ids() {
+        let options = json!([
+            {"id": "m", "category": "model", "options": []},
+            {"id": "thinking", "options": [{"value": "high", "name": "High"}]}
+        ]);
+        assert_eq!(find_option(&options, "model").unwrap()["id"], "m");
+        assert_eq!(find_option(&options, "thought_level").unwrap()["id"], "thinking");
+        assert!(find_option(&options, "mode").is_none());
+        let tagged = json!([{"id": "effort", "category": "_custom"}, {"id": "t", "category": "thought_level"}]);
+        assert_eq!(find_option(&tagged, "thought_level").unwrap()["id"], "t");
+    }
+
+    #[test]
     fn config_option_values_include_groups() {
         let opt = json!({"id": "model", "options": [{"value": "a", "name": "A"}, {"group": "g", "name": "G", "options": [{"value": "b", "name": "B"}]}]});
         assert_eq!(option_values(&opt), [("a".to_string(), "A".to_string()), ("b".to_string(), "B".to_string())]);
+    }
+
+    #[test]
+    fn models_come_from_config_options_or_the_older_models_field() {
+        let opened = json!({"configOptions": [
+            {"id": "model", "category": "model", "currentValue": "b", "options": [{"value": "a", "name": "A"}, {"value": "b", "name": "b"}]},
+            {"id": "thinking", "currentValue": "high", "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]}
+        ]});
+        let list = models_of(&opened, "x".into());
+        assert_eq!(list.models.len(), 2);
+        assert!(list.models[1].default && list.models[1].name.is_none());
+        assert_eq!(list.models[0].name.as_deref(), Some("A"));
+        assert_eq!(list.efforts, ["low", "high"]);
+        let older = json!({"models": {"currentModelId": "m2", "availableModels": [{"modelId": "m1", "name": "One"}, {"modelId": "m2", "name": "m2"}]}});
+        let list = models_of(&older, "x".into());
+        assert_eq!(list.models[0].name.as_deref(), Some("One"));
+        assert!(list.models[1].default);
+        assert!(list.notes.iter().any(|n| n.contains("thought-level")));
     }
 }

@@ -1,15 +1,36 @@
 //! Claude Code (`claude -p --output-format stream-json`), so that Claude Code can be an executor
 //! under another advisor.
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use hufu_contract::{
-    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ProbeResult, Profile,
-    RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
+    Adapter, AdapterError, CancelToken, Capabilities, Effort, EventBody, EventSink, LaunchPlan, ModelInfo, ModelList,
+    ProbeResult, Profile, RawStream, RunOutcome, RunRequest, StructuredOutput, Tier, Usage,
 };
 use serde_json::{Value, json};
 
 use crate::common::{self, Collected};
 
 const DEFAULT: &[&str] = &["claude"];
+const MODEL_PAGE: &str = "https://code.claude.com/docs/en/model-config";
+/// Claude Code's model aliases and current model ids, with their default effort, from the model
+/// configuration page as of 2026-11-20. Claude Code has no command that lists models.
+const MODELS: &[(&str, &str, Option<&str>)] = &[
+    ("default", "the account's default model", None),
+    ("best", "Fable where the account has it, otherwise the same model as `opus`", None),
+    ("fable", "Fable 5.1, unless ANTHROPIC_DEFAULT_FABLE_MODEL says otherwise", Some("high")),
+    ("opus", "Opus 5.5 on the Anthropic API", Some("medium")),
+    ("sonnet", "Sonnet 5.5 on the Anthropic API", Some("medium")),
+    ("haiku", "Haiku 5.5 on the Anthropic API", Some("medium")),
+    ("opus[1m]", "`opus` with a one-million-token context", Some("medium")),
+    ("sonnet[1m]", "`sonnet` with a one-million-token context", Some("medium")),
+    ("opusplan", "`opus` while planning, `sonnet` while carrying out the plan", None),
+    ("claude-fable-5-1", "Fable 5.1", Some("high")),
+    ("claude-opus-5-5", "Opus 5.5", Some("medium")),
+    ("claude-sonnet-5-5", "Sonnet 5.5", Some("medium")),
+    ("claude-haiku-5-5", "Haiku 5.5", Some("medium")),
+];
 const INSTALL: &str = "install Claude Code: `curl -fsSL https://claude.ai/install.sh | bash` or `npm install -g @anthropic-ai/claude-code`, then run `claude` once to sign in";
 const FORBIDDEN: &[&str] = &[
     "--permission-mode",
@@ -19,6 +40,7 @@ const FORBIDDEN: &[&str] = &[
     "--allowed-tools",
     "--add-dir",
     "--permission-prompt-tool",
+    "--permission-prompts",
     "--settings",
 ];
 
@@ -62,7 +84,7 @@ impl Adapter for ClaudeCli {
     fn capabilities(&self, _profile: &Profile) -> Capabilities {
         Capabilities {
             permission_tiers: Tier::ALL.to_vec(),
-            efforts: vec![Effort::Low, Effort::Medium, Effort::High, Effort::Max],
+            efforts: Effort::LOW_TO_MAX.to_vec(),
             native_effort: true,
             checked_at_runtime: false,
             models: Vec::new(),
@@ -73,7 +95,9 @@ impl Adapter for ClaudeCli {
             accepts_mcp_servers: true,
             provides: Vec::new(),
             notes: vec![
-                "read-only is plan mode; workspace-write is acceptEdits (file edits allowed, other tools need Claude Code's own allow rules)".into(),
+                "read-only is plan mode; workspace-write is acceptEdits (file edits allowed, other tools need Claude Code's own allow rules); both pass `--permission-prompts none`, which needs Claude Code 2.1.259 or later".into(),
+                "models: an alias (best, fable, opus, sonnet, haiku, opus[1m], sonnet[1m], opusplan) or a full id such as claude-opus-5-5".into(),
+                "a model without a level falls back to the highest level it has below it (Opus 4.6 and Sonnet 4.6 have no xhigh); `native:ultracode` is xhigh with ultracode on".into(),
             ],
         }
     }
@@ -83,9 +107,18 @@ impl Adapter for ClaudeCli {
         let mut plan = common::plan_start(profile, DEFAULT);
         let a = &mut plan.args;
         a.extend(["-p".into(), "--output-format".into(), "stream-json".into(), "--verbose".into()]);
+        // `--permission-prompts none` (Claude Code 2.1.259 and later): nobody answers a prompt in
+        // print mode, so anything that would ask is denied at once, and the mode decides the rest.
         match req.permission {
-            Tier::ReadOnly => a.extend(["--permission-mode".into(), "plan".into()]),
-            Tier::WorkspaceWrite => a.extend(["--permission-mode".into(), "acceptEdits".into()]),
+            Tier::ReadOnly => {
+                a.extend(["--permission-mode".into(), "plan".into(), "--permission-prompts".into(), "none".into()])
+            }
+            Tier::WorkspaceWrite => a.extend([
+                "--permission-mode".into(),
+                "acceptEdits".into(),
+                "--permission-prompts".into(),
+                "none".into(),
+            ]),
             Tier::FullAccess => a.push("--dangerously-skip-permissions".into()),
         }
         if let Some(model) = &req.model {
@@ -93,13 +126,13 @@ impl Adapter for ClaudeCli {
         }
         match &req.effort {
             Effort::Default => {}
-            Effort::Low | Effort::Medium | Effort::High | Effort::Max => {
+            Effort::Low | Effort::Medium | Effort::High | Effort::XHigh | Effort::Max => {
                 a.extend(["--effort".into(), req.effort.to_string()])
             }
             Effort::Native(v) => a.extend(["--effort".into(), v.clone()]),
             Effort::Off => {
                 return Err(AdapterError(
-                    "Claude Code has no `off` effort level; accepted: default, low, medium, high, max, native:<value>"
+                    "Claude Code has no `off` effort level; accepted: default, low, medium, high, xhigh, max, native:<value>"
                         .into(),
                 ));
             }
@@ -120,6 +153,36 @@ impl Adapter for ClaudeCli {
         a.extend(profile.args.iter().cloned());
         plan.stdin = Some(req.prompt.clone());
         Ok(plan)
+    }
+
+    /// Claude Code cannot list models, so this is Hufu's copy of its model configuration page.
+    fn models(
+        &self,
+        _profile: &Profile,
+        _env: &BTreeMap<String, String>,
+        _cwd: &Path,
+    ) -> Result<ModelList, AdapterError> {
+        let efforts: Vec<String> = Effort::LOW_TO_MAX.iter().map(|e| e.to_string()).collect();
+        Ok(ModelList {
+            source: "documentation".into(),
+            from: format!("{MODEL_PAGE} (checked 2026-11-20)"),
+            models: MODELS
+                .iter()
+                .map(|(id, about, effort)| ModelInfo {
+                    id: id.to_string(),
+                    description: Some(about.to_string()),
+                    default_effort: effort.map(str::to_string),
+                    default: *id == "default",
+                    ..ModelInfo::default()
+                })
+                .collect(),
+            efforts,
+            notes: vec![
+                "Claude Code has no command that lists models; newer models may exist, see the page above".into(),
+                "on Bedrock, Vertex AI or Microsoft Foundry the aliases resolve to older models".into(),
+                "Opus 4.6 and Sonnet 4.6 have no xhigh; a missing level falls back to the next lower one".into(),
+            ],
+        })
     }
 
     fn run(&self, profile: &Profile, req: &RunRequest, sink: &dyn EventSink, cancel: &CancelToken) -> RunOutcome {
@@ -260,6 +323,7 @@ mod tests {
         assert!(ro.args.windows(2).any(|w| w == ["--permission-mode", "plan"]));
         let ww = ClaudeCli.plan(&p, &request(Tier::WorkspaceWrite)).unwrap();
         assert!(ww.args.windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]));
+        assert!(ww.args.windows(2).any(|w| w == ["--permission-prompts", "none"]));
         let mut req = request(Tier::FullAccess);
         req.effort = Effort::Max;
         req.mcp_servers = vec![McpServerSpec {
@@ -270,10 +334,16 @@ mod tests {
         }];
         let full = ClaudeCli.plan(&p, &req).unwrap();
         assert!(full.args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(!full.args.contains(&"--permission-prompts".to_string()));
         assert!(full.args.windows(2).any(|w| w == ["--effort", "max"]));
         let cfg = &full.args[full.args.iter().position(|a| a == "--mcp-config").unwrap() + 1];
         assert_eq!(serde_json::from_str::<Value>(cfg).unwrap()["mcpServers"]["hufu"]["command"], "hufu");
         assert_eq!(full.stdin.as_deref(), Some("do the thing"));
+        let mut req = request(Tier::ReadOnly);
+        req.effort = Effort::XHigh;
+        assert!(ClaudeCli.plan(&p, &req).unwrap().args.windows(2).any(|w| w == ["--effort", "xhigh"]));
+        req.effort = Effort::Native("ultracode".into());
+        assert!(ClaudeCli.plan(&p, &req).unwrap().args.windows(2).any(|w| w == ["--effort", "ultracode"]));
     }
 
     #[test]

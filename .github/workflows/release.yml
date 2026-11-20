@@ -10,9 +10,12 @@ name: Release
 #   - Pushing a tag `v<version>`: publishes that tag.
 #   - A pull request that changes this file, the install scripts or the updater: always a dry run.
 #
-# Until the first stable release exists, a pre-release version (`0.1.0-rc.1`) becomes the latest
-# release, because there is nothing else to install. After that, pre-release versions are
-# published as GitHub pre-releases and are installed by name: `hufu update --version <tag>`.
+# A stable version becomes the latest release. A pre-release version (`1.1.0-rc.1`) is published as a
+# GitHub pre-release once a stable release exists, and is installed by name:
+# `hufu update --version <tag>`.
+#
+# The release text is GitHub's generated list of changes. When doc/releases/<tag>.md exists, its
+# text comes first.
 
 on:
   push:
@@ -281,8 +284,13 @@ jobs:
               if [ "$stable" -gt 0 ]; then channel="--prerelease"; fi
               ;;
           esac
+          notes=()
+          if [ -f "doc/releases/$TAG.md" ]; then
+            # gh puts this text before the generated list of changes.
+            notes=(--notes-file "doc/releases/$TAG.md")
+          fi
           # gh uploads the files to a draft and publishes it only when all of them are there.
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$title" --generate-notes $channel
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$title" --generate-notes "${notes[@]}" $channel
 
   verify:
     name: Install the published release

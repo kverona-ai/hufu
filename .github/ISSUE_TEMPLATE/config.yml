@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: User guide
+    url: https://github.com/kverona-ai/hufu/blob/main/doc/guide/user-guide.md
+    about: Every command, the configuration reference, the MCP tools and troubleshooting.
+  - name: 用户指南（中文 README）
+    url: https://github.com/kverona-ai/hufu/blob/main/README.zh-CN.md
+    about: 中文说明。issue 用中文或英文写都可以。

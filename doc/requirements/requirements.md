@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Implemented in Hufu 0.1. How far each milestone has been verified is recorded in the [roadmap](../roadmap.md) |
+| **Status** | Implemented in Hufu 1.0 (first in 0.1). How far each milestone has been verified is recorded in the [roadmap](../roadmap.md) |
 | **Last updated** | 2026-11-12 (many executors and accounts, one advisor, computer use assigned to any capable executor, one-command setup, configuration over MCP, three platforms) |
 | **Related** | [Research](../research/agent-landscape.md), [Architecture](../architecture/architecture.md), [Roadmap](../roadmap.md) |
 
@@ -135,7 +135,7 @@ tools, and `hufu agents` shows the new profile.
 Priority: **P0** must have for the milestone named, **P1** should have, **P2** later.
 Milestones are defined in the [roadmap](../roadmap.md). The project owner asked for every
 requirement to be implemented in the first version, so the milestone column now only says which
-theme a requirement belongs to; all of them are in Hufu 0.1.
+theme a requirement belongs to; all of them are in Hufu 0.1 and later.
 
 ### 7.1 Tasks and jobs
 
